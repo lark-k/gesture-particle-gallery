@@ -190,7 +190,8 @@ export class HandCamera {
           const result = this.detector.detectForVideo(this.video, time);
           this.onFrame({
             landmarks: result.landmarks[0] || [],
-            confidence: result.handedness[0]?.[0]?.score || 0,
+            worldLandmarks: result.worldLandmarks[0] || [],
+            // Detection/presence thresholds are enforced by HandLandmarker.
             time,
             aspect,
           });

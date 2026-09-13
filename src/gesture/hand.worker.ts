@@ -40,7 +40,8 @@ globalThis.onmessage = async (event: MessageEvent) => {
         globalThis.postMessage({
           type: "result",
           landmarks: result.landmarks[0] || [],
-          confidence: result.handedness[0]?.[0]?.score || 0,
+          worldLandmarks: result.worldLandmarks[0] || [],
+          // Handedness scores classify left/right; they are not presence scores.
           time: m.time,
           aspect: m.aspect,
         });

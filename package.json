@@ -13,6 +13,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:browser": "node scripts/browser-qa.mjs",
     "test:camera": "node scripts/camera-qa.mjs",
+    "test:gesture": "node scripts/gesture-qa.mjs",
     "test:lifecycle": "node scripts/lifecycle-qa.mjs",
     "test:session": "node scripts/session-qa.mjs",
     "test:resilience": "node scripts/resilience-qa.mjs",

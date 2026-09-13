@@ -1,264 +1,270 @@
 import { GESTURE as G } from "../config";
 import type { SceneState } from "../../shared/types";
-export interface Landmark {
-  x: number;
-  y: number;
-  z: number;
-}
+import { CursorFilter, LandmarkFilter } from "./filter";
+import { handGeometry } from "./geometry";
+
+export interface Landmark { x: number; y: number; z: number }
 export interface HandFrame {
   landmarks: Landmark[];
-  confidence: number;
+  worldLandmarks?: Landmark[];
   time: number;
   aspect: number;
 }
+type Point = { x: number; y: number };
+type Pose = "open" | "point" | "unknown";
 export interface GestureDebug {
   status: string;
   gesture: string;
+  mode: "waiting" | "switching" | "calibrating" | "rotate" | "point" | "select" | "return" | "paused";
+  pose: Pose;
   scale: number;
   progress: number;
-  pinch: number;
-  cursor: { x: number; y: number } | null;
-  locked: string | null;
+  cursor: Point | null;
+  target: string | null;
+  rotationSpeed: number;
+  neutral: Point | null;
+  deflection: number;
 }
 export interface GestureContext {
   state: SceneState;
   candidate: string | null;
   hit: (x: number, y: number) => string | null;
+  returnHit: (x: number, y: number) => boolean;
   target: (id: string | null) => void;
-  pull: (id: string) => void;
-  push: () => void;
+  pull: (id: string) => boolean | void;
+  push: () => boolean | void;
   rotate: (v: number) => void;
 }
-interface Sample {
-  t: number;
-  x: number;
-  y: number;
-  scale: number;
-  tilt: number;
-}
+const initialDebug = (): GestureDebug => ({
+  status: "等待手部", gesture: "张掌浏览 · 单食指选片", mode: "waiting", pose: "unknown",
+  scale: 0, progress: 0, cursor: null, target: null, rotationSpeed: 0, neutral: null, deflection: 0,
+});
+
 export class GestureRecognizer {
-  debug: GestureDebug = {
-    status: "等待手部",
-    gesture: "无",
-    scale: 0,
-    progress: 0,
-    pinch: 1,
-    cursor: null,
-    locked: null,
-  };
+  debug = initialDebug();
+  private landmarks = new LandmarkFilter();
+  private cursor = new CursorFilter();
   private points: Landmark[] | null = null;
-  private lastTime = 0;
-  private lastSeen = 0;
-  private history: Sample[] = [];
-  private pinched = false;
-  private grab: { id: string; base: Sample; thresholdAt: number } | null = null;
-  private pushBase: Sample | null = null;
-  private pushAt = 0;
-  private candidate: string | null = null;
-  private dwellAt = 0;
-  private cooldownUntil = 0;
-  private rearmAt = 0;
-  private armed = true;
-  private previousState: SceneState = "OVERVIEW";
-  private openAt = 0;
-  reset(time = performance.now()) {
+  private lastTime = -Infinity;
+  private lastSeen = -Infinity;
+  private phase: "browse" | "focus" | "busy" | null = null;
+  private pose: Pose = "unknown";
+  private pendingPose: Pose = "unknown";
+  private poseAt = 0;
+  private neutral: Point | null = null;
+  private center: { point: Point; time: number } | null = null;
+  private dwell: { id: string; anchor: Point; elapsed: number; time: number } | null = null;
+  private actionLatched = false;
+  private returnArmed = false;
+  private uncertainAt: number | null = null;
+
+  reset(_time?: number) {
+    this.clearControls();
+    this.landmarks.reset();
+    this.cursor.reset();
     this.points = null;
-    this.history = [];
-    this.pinched = false;
-    this.grab = null;
-    this.pushBase = null;
-    this.candidate = null;
-    this.pushAt = 0;
-    this.dwellAt = 0;
-    this.openAt = 0;
-    this.cooldownUntil = time + G.cooldownMs;
-    this.armed = false;
-    this.rearmAt = 0;
-    this.debug.locked = null;
-    this.debug.progress = 0;
+    this.lastTime = this.lastSeen = -Infinity;
+    this.phase = null;
+    this.debug = initialDebug();
+  }
+  private clearControls() {
+    this.pose = this.pendingPose = "unknown";
+    this.neutral = null;
+    this.center = null;
+    this.dwell = null;
+    this.returnArmed = false;
+    this.actionLatched = false;
+    this.uncertainAt = null;
   }
   lost(time: number, ctx: GestureContext) {
-    this.debug.status = "未检测到手";
-    this.debug.gesture = "无";
-    this.debug.progress = 0;
-    if (time - this.lastSeen > G.lossGraceMs) {
-      this.history = [];
-      this.pushBase = null;
-      this.grab = null;
-      this.debug.locked = null;
+    if (!Number.isFinite(time) || time < this.lastTime) return;
+    this.lastTime = time;
+    ctx.rotate(0);
+    ctx.target(null);
+    this.clearControls();
+    this.landmarks.reset();
+    this.points = null;
+    this.debug = { ...initialDebug(), status: "未检测到手 · 已停止", gesture: "重新张掌停稳，或伸食指选片",
+      cursor: time - this.lastSeen <= G.lossCancelMs ? this.debug.cursor : null };
+    if (!this.debug.cursor) this.cursor.reset();
+  }
+  private hold(id: string, point: Point, time: number) {
+    if (!this.dwell || this.dwell.id !== id) {
+      this.dwell = { id, anchor: point, elapsed: 0, time };
+    } else {
+      if (Math.hypot(point.x - this.dwell.anchor.x, point.y - this.dwell.anchor.y) > G.dwellRadius) {
+        this.dwell.anchor = point;
+        this.dwell.elapsed = 0;
+      } else this.dwell.elapsed += Math.min(G.lossGraceMs, time - this.dwell.time);
+      this.dwell.time = time;
     }
-    if (time - this.lastSeen > G.lossCancelMs) {
-      this.reset(time);
-      this.debug.cursor = null;
-      ctx.target(null);
-    }
+    this.debug.target = id;
+    this.debug.progress = Math.min(1, this.dwell.elapsed / G.dwellMs);
+    return this.debug.progress === 1;
   }
   process(frame: HandFrame, ctx: GestureContext) {
     const { time, aspect } = frame;
-    if (frame.landmarks.length !== 21 || frame.confidence < G.confidence) {
+    if (!Number.isFinite(time) || time <= this.lastTime) return;
+    const dt = Math.max(1, Math.min(100, time - this.lastTime));
+    this.lastTime = time;
+    if (frame.landmarks.length !== 21 || !Number.isFinite(aspect) || aspect <= 0 ||
+        frame.landmarks.some((p) => ![p.x, p.y, p.z].every(Number.isFinite))) {
       this.lost(time, ctx);
       return;
     }
-    if (ctx.state !== this.previousState) {
-      if (ctx.state === "OVERVIEW" || ctx.state === "FOCUSED") this.reset(time);
-      this.previousState = ctx.state;
-    }
-    if (time - this.lastSeen > G.lossGraceMs) {
-      this.points = null;
-      this.history = [];
-      this.grab = null;
-      this.pushBase = null;
-    }
-    const dt = Math.max(1, time - this.lastTime),
-      alpha = 1 - Math.exp(-dt / G.smoothingMs);
-    this.lastTime = time;
-    this.lastSeen = time;
-    this.points = frame.landmarks.map((p, i) => {
-      const old = this.points?.[i];
-      return old
-        ? {
-            x: old.x + (p.x - old.x) * alpha,
-            y: old.y + (p.y - old.y) * alpha,
-            z: old.z + (p.z - old.z) * alpha,
-          }
-        : p;
-    });
-    const p = this.points;
-    const dist = (a: number, b: number) =>
-      Math.hypot((p[a].x - p[b].x) * aspect, p[a].y - p[b].y);
-    // Only 2D palm measurements; wrist-relative z is never a distance cue.
-    const scale = (dist(0, 9) + dist(5, 17)) / 2;
+    const distance = (points: Landmark[], a: number, b: number) =>
+      Math.hypot((points[a].x - points[b].x) * aspect, points[a].y - points[b].y);
+    const scale = (distance(frame.landmarks, 0, 9) + distance(frame.landmarks, 5, 17)) / 2;
     if (scale < 0.035) {
       this.lost(time, ctx);
       return;
     }
-    const x = 1 - (p[0].x + p[5].x + p[9].x + p[17].x) / 4,
-      y = (p[0].y + p[5].y + p[9].y + p[17].y) / 4;
-    const tilt = dist(5, 17) / Math.max(0.001, dist(0, 9));
-    const pinch = dist(4, 8) / scale;
-    const wasPinched = this.pinched;
-    this.pinched = pinch < (wasPinched ? G.pinchExit : G.pinchEnter);
-    const open =
-      [8, 12, 16, 20].every((tip) => dist(tip, 0) > dist(tip - 2, 0) * 1.16) &&
-      !this.pinched;
-    const cursor = {
-      x: Math.min(0.98, Math.max(0.02, (1 - p[8].x - 0.12) / 0.76)),
-      y: Math.min(0.98, Math.max(0.02, (p[8].y - 0.1) / 0.8)),
-    };
-    const sample = { t: time, x, y, scale, tilt };
-    this.history.push(sample);
-    this.history = this.history.filter((s) => time - s.t <= G.swipeWindowMs);
-    this.debug = {
-      status: "正在识别 · 单手",
-      gesture: this.pinched ? "捏合锁定" : open ? "张开手掌" : "指向",
-      scale,
-      progress: 0,
-      pinch,
-      cursor,
-      locked: this.grab?.id || null,
-    };
-    if (ctx.state === "PULLING" || ctx.state === "PUSHING") return;
-    const old = this.history[0];
-    const speed =
-      (Math.abs(x - old.x) * aspect) /
-      scale /
-      Math.max(0.06, (time - old.t) / 1000);
-    if (!this.armed) {
-      if (speed < 0.45 && !this.pinched) {
-        if (!this.rearmAt) this.rearmAt = time;
-        if (time - this.rearmAt > G.rearmStillMs) this.armed = true;
-      } else this.rearmAt = 0;
+    const phase = ctx.state === "FOCUSED" ? "focus" :
+      ctx.state === "PULLING" || ctx.state === "PUSHING" ? "busy" : "browse";
+    if (phase !== this.phase || time - this.lastSeen > G.lossGraceMs) {
+      this.clearControls();
+      this.landmarks.reset();
+      this.points = null;
+      this.cursor.reset();
+      ctx.rotate(0);
+      ctx.target(null);
+      this.phase = phase;
     }
-    if (time < this.cooldownUntil) return;
-    if (ctx.state === "FOCUSED") {
-      if (!open) {
-        this.pushBase = null;
-        this.openAt = 0;
-        this.pushAt = 0;
-        return;
-      }
-      if (!this.openAt) this.openAt = time;
-      if (time - this.openAt < 180) return;
-      if (!this.pushBase) this.pushBase = sample;
-      const b = this.pushBase;
-      if (
-        time - b.t > G.maxDepthMs ||
-        Math.abs(tilt - b.tilt) > G.maxTiltChange ||
-        Math.hypot((x - b.x) * aspect, y - b.y) > b.scale * 0.75
-      ) {
-        this.pushBase = sample;
-        this.pushAt = 0;
-        return;
-      }
-      const ratio = scale / b.scale;
-      this.debug.progress = Math.max(
-        0,
-        Math.min(1, (ratio - 1) / (G.pushRatio - 1)),
-      );
-      this.debug.gesture = "张掌前推";
-      if (ratio >= G.pushRatio && time - b.t >= G.minDepthMs) {
-        if (!this.pushAt) this.pushAt = time;
-        if (time - this.pushAt >= G.depthHoldMs) {
-          ctx.push();
-          this.reset(time);
-        }
-      } else if (ratio < G.pushRatio - 0.06) this.pushAt = 0;
+    this.lastSeen = time;
+    const rawPose = handGeometry(frame.landmarks, aspect, frame.worldLandmarks, this.pose).pose;
+    // Ambiguous poses must not pollute the pointer's median history.
+    const stable = rawPose === "unknown" && this.pose === "point" && this.points
+      ? this.points : this.landmarks.process(frame.landmarks);
+    const alpha = 1 - Math.exp(-dt / G.smoothingMs);
+    this.points = stable.map((p, i) => {
+      const old = this.points?.[i];
+      return old ? { x: old.x + (p.x - old.x) * alpha, y: old.y + (p.y - old.y) * alpha,
+        z: old.z + (p.z - old.z) * alpha } : p;
+    });
+    // Use current geometry for the stop gate; filtered motion must never keep
+    // rotating while the user is changing to a pointing pose.
+    const previousCursor = this.debug.cursor;
+    this.debug = { ...initialDebug(), status: "本地识别 · 单手", scale, pose: rawPose, neutral: this.neutral };
+    if (phase === "busy" || this.actionLatched) {
+      ctx.rotate(0);
+      this.debug.mode = "paused";
+      this.debug.gesture = "正在切换照片";
       return;
     }
-    if (this.pinched) {
-      if (!wasPinched && ctx.candidate)
-        this.grab = { id: ctx.candidate, base: sample, thresholdAt: 0 };
-      if (!this.grab) return;
-      const b = this.grab.base;
-      this.debug.locked = this.grab.id;
-      if (
-        time - b.t > G.maxDepthMs ||
-        Math.abs(tilt - b.tilt) > G.maxTiltChange ||
-        Math.hypot((x - b.x) * aspect, y - b.y) > b.scale * 1.1
-      ) {
-        this.grab = null;
-        return;
+    // A briefly ambiguous finger pose pauses dwell rather than erasing it.
+    // No action may finish during ambiguity, and missing hands still reset fully.
+    if (rawPose === "unknown" && this.pose === "point") {
+      this.uncertainAt ??= time;
+      ctx.rotate(0);
+      if (time - this.uncertainAt > G.pointGraceMs) {
+        this.dwell = null;
+        ctx.target(null);
       }
-      const ratio = scale / b.scale;
-      this.debug.progress = Math.max(
-        0,
-        Math.min(1, (1 - ratio) / (1 - G.pullRatio)),
-      );
-      this.debug.gesture = "抓取后拉";
-      if (ratio <= G.pullRatio && time - b.t >= G.minDepthMs) {
-        if (!this.grab.thresholdAt) this.grab.thresholdAt = time;
-        if (time - this.grab.thresholdAt >= G.depthHoldMs) {
-          const id = this.grab.id;
-          ctx.pull(id);
-          this.reset(time);
-        }
-      } else if (ratio > G.pullRatio + 0.05) this.grab.thresholdAt = 0;
+      this.debug.cursor = previousCursor;
+      this.debug.target = this.dwell?.id ?? null;
+      this.debug.progress = this.dwell ? this.dwell.elapsed / G.dwellMs : 0;
+      this.debug.mode = "switching";
+      this.debug.gesture = "食指识别暂不稳定 · 自然伸直即可";
       return;
     }
-    this.grab = null;
-    const hit = ctx.hit(cursor.x, cursor.y);
-    if (hit !== this.candidate) {
-      this.candidate = hit;
-      this.dwellAt = time;
-      ctx.target(null);
+    if (this.uncertainAt !== null) {
+      if (this.dwell) this.dwell.time = time;
+      this.uncertainAt = null;
     }
-    if (hit && time - this.dwellAt >= G.dwellMs) ctx.target(hit);
-    if (!open || !this.armed) return;
-    const dx = ((x - old.x) * aspect) / scale,
-      dy = Math.abs(y - old.y) / scale;
-    if (
-      Math.abs(dx) >= G.swipeDistance &&
-      speed >= G.swipeSpeed &&
-      dy < 0.55 &&
-      time - old.t >= 100
-    ) {
-      ctx.rotate(Math.sign(dx) * 0.7);
-      this.debug.gesture = dx > 0 ? "向右扒拉" : "向左扒拉";
-      this.cooldownUntil = time + G.cooldownMs;
-      this.armed = false;
-      this.rearmAt = 0;
-      this.history = [];
+    if (rawPose !== this.pose || rawPose === "unknown") {
+      ctx.rotate(0);
       ctx.target(null);
+      this.dwell = null;
+      this.center = null;
+      if (rawPose !== this.pendingPose) {
+        this.pendingPose = rawPose;
+        this.poseAt = time;
+      }
+      if (rawPose === "unknown" || time - this.poseAt < (rawPose === "point" ? G.pointHoldMs : G.poseHoldMs)) {
+        this.debug.mode = "switching";
+        this.debug.gesture = rawPose === "unknown" ? "请张开手掌，或只伸出食指" : "保持手型片刻";
+        return;
+      }
+      this.pose = rawPose;
+      this.neutral = null;
+      this.cursor.reset();
+    }
+    this.pendingPose = rawPose;
+    this.poseAt = time;
+    if (this.pose === "open") {
+      this.dwell = null;
+      ctx.target(null);
+      if (phase === "focus") {
+        ctx.rotate(0);
+        this.debug.mode = "point";
+        this.debug.gesture = "伸出食指，停留在返回按钮上";
+        return;
+      }
+      const p = this.points;
+      const palm = {
+        x: 1 - (p[0].x + p[5].x + p[9].x + p[17].x) / 4,
+        y: (p[0].y + p[5].y + p[9].y + p[17].y) / 4,
+      };
+      if (!this.neutral) {
+        ctx.rotate(0);
+        if (!this.center || Math.hypot(palm.x - this.center.point.x, palm.y - this.center.point.y) > G.centerStillRadius)
+          this.center = { point: palm, time };
+        this.debug.mode = "calibrating";
+        this.debug.gesture = "张掌停稳 · 正在建立中立点";
+        this.debug.progress = Math.min(1, (time - this.center.time) / G.centerHoldMs);
+        if (this.debug.progress < 1) return;
+        this.neutral = { ...palm };
+      }
+      const dx = palm.x - this.neutral.x;
+      const range = Math.max(0.06, Math.min(G.joystickRange, this.neutral.x - 0.02, 0.98 - this.neutral.x));
+      const strength = Math.min(1, Math.max(0, (Math.abs(dx) - G.joystickDeadzone) / (range - G.joystickDeadzone)));
+      const speed = Math.sign(dx) * G.rotationMaxSpeed * Math.pow(strength, 1.3);
+      ctx.rotate(speed);
+      this.debug.mode = "rotate";
+      this.debug.neutral = this.neutral;
+      this.debug.deflection = Math.max(-1, Math.min(1, dx / range));
+      this.debug.rotationSpeed = speed;
+      this.debug.progress = 0;
+      this.debug.gesture = !speed ? "中立点 · 已停转" : speed > 0 ? "向右旋转 · 保持位置即可" : "向左旋转 · 保持位置即可";
+      return;
+    }
+
+    ctx.rotate(0);
+    this.neutral = null;
+    const point = this.cursor.process({
+      x: Math.min(0.98, Math.max(0.02, (1 - stable[8].x - 0.12) / 0.76)),
+      y: Math.min(0.98, Math.max(0.02, (stable[8].y - 0.1) / 0.8)),
+    }, dt, false);
+    this.debug.cursor = point;
+    this.debug.mode = "point";
+    if (phase === "focus") {
+      const inside = ctx.returnHit(point.x, point.y);
+      if (!inside) this.returnArmed = true;
+      if (!inside || !this.returnArmed) {
+        this.dwell = null;
+        this.debug.gesture = this.returnArmed ? "食指移到返回按钮，停留确认" : "先移开光标，再指向返回按钮";
+        return;
+      }
+      this.debug.mode = "return";
+      this.debug.gesture = "保持停留 · 即将返回";
+      if (this.hold("return", point, time)) {
+        this.actionLatched = ctx.push() !== false;
+        this.dwell = null;
+      }
+      return;
+    }
+    const hit = ctx.hit(point.x, point.y);
+    ctx.target(hit);
+    if (!hit) {
+      this.dwell = null;
+      this.debug.gesture = "食指指向任意照片 · 停留 0.7 秒打开";
+      return;
+    }
+    this.debug.mode = "select";
+    this.debug.gesture = "保持停留 · 即将打开照片";
+    if (this.hold(hit, point, time)) {
+      this.actionLatched = ctx.pull(hit) !== false;
+      this.dwell = null;
     }
   }
 }

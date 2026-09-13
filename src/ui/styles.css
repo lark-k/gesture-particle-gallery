@@ -140,18 +140,62 @@ a {
   z-index: 15;
   pointer-events: none;
   opacity: 0;
+  transition: transform 70ms linear, opacity 160ms ease;
+  will-change: transform;
 }
 .hand-cursor > div {
-  width: 24px;
-  height: 24px;
+  width: 34px;
+  height: 34px;
   border: 1px solid #e9cb9b;
   box-shadow: 0 0 12px #e9cb9b33;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   background: #e9cb9b11;
 }
+.hand-cursor svg {
+  position: absolute;
+  inset: -5px;
+  width: 42px;
+  height: 42px;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+.hand-cursor circle { fill: none; stroke: #baf3d4; stroke-width: 3; transition: stroke-dashoffset 70ms linear; }
+.hand-cursor span { position: absolute; top: 42px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; color: #fff; text-shadow: 0 1px 4px #000; }
+.gesture-guide {
+  position: fixed; z-index: 6; top: 96px; left: 50%; transform: translateX(-50%);
+  width: min(480px, calc(100vw - 32px)); padding: 12px 18px; border-radius: 14px;
+  border: 1px solid #e9cb9b45; background: #14251dee; text-align: center; pointer-events: none;
+  box-shadow: 0 8px 28px #0002;
+}
+.gesture-guide strong { display: block; font-size: 14px; color: #f1e4ca; }
+.gesture-guide small { display: block; margin-top: 7px; font-size: 11px; color: #d4ded4; line-height: 1.6; }
+.gesture-joystick { position: relative; height: 18px; margin: 13px 15px; background: #ffffff13; border-radius: 12px; }
+.joystick-center { position: absolute; left: 42%; width: 16%; height: 100%; background: #bcf1cc33; border-left: 1px solid #baf3d4; border-right: 1px solid #baf3d4; }
+.gesture-joystick i { position: absolute; top: -2px; width: 22px; height: 22px; border-radius: 50%; background: #e9cb9b; border: 3px solid #fff8; transform: translateX(-50%); transition: left 70ms linear; }
+.gesture-guide progress, .gesture-return progress { display: block; width: 100%; height: 5px; border: 0; border-radius: 4px; overflow: hidden; accent-color: #baf3d4; }
+.gesture-guide progress { margin-top: 12px; }
+.gesture-guide progress::-webkit-progress-bar, .gesture-return progress::-webkit-progress-bar { background: #ffffff20; }
+.gesture-guide progress::-webkit-progress-value, .gesture-return progress::-webkit-progress-value { background: #baf3d4; }
+.gesture-return {
+  position: fixed; top: 190px; right: 32px; z-index: 12; min-height: 82px; width: 220px;
+  display: flex; align-items: center; gap: 12px; padding: 16px 18px 22px;
+  border: 1px solid #e9cb9b88; border-radius: 14px; background: #14251df5; color: #f1e4ca; text-align: left;
+}
+.gesture-return small { display: block; margin-top: 7px; color: #c2d6c5; font-size: 11px; }
+.gesture-return progress { position: absolute; left: 12px; bottom: 9px; width: calc(100% - 24px); }
+@media (max-width: 700px) {
+  .gesture-guide { top: 94px; padding: 10px 12px; }
+  .gesture-guide strong { font-size: 12px; }
+  .gesture-guide small { font-size: 10px; }
+  .gesture-return { top: 202px; right: 16px; width: 186px; }
+}
 .hand-cursor.hidden {
   display: none;
+}
+.hand-cursor[data-locked="true"] > div {
+  border-width: 2px;
+  background: #e9cb9b44;
 }
 .debug-panel {
   position: absolute;

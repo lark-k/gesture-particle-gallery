@@ -64,7 +64,8 @@ const qualityLabel = { low: "流畅", medium: "均衡", high: "精细" };
 export default function App() {
   const host = useRef<HTMLDivElement>(null),
     video = useRef<HTMLVideoElement>(null),
-    cursor = useRef<HTMLDivElement>(null);
+    cursor = useRef<HTMLDivElement>(null),
+    gestureReturn = useRef<HTMLButtonElement>(null);
   const scene = useRef<GalleryScene | null>(null),
     camera = useRef<HandCamera | null>(null),
     recognizer = useRef(new GestureRecognizer());
@@ -226,6 +227,9 @@ export default function App() {
     scene.current?.setOrbiting(autoOrbit);
   }, [autoOrbit, config?.user?.id]);
   useEffect(() => {
+    scene.current?.setGestureControl(cameraOn);
+  }, [cameraOn, config?.user?.id]);
+  useEffect(() => {
     if (!config) return;
     const generation = ++accountGeneration.current;
     userId.current = config.user?.id || null;
@@ -276,12 +280,18 @@ export default function App() {
     let lastDebug = 0;
     c.onStatus = setCameraStatus;
     c.onError = (m) => {
+      recognizer.current.reset();
+      scene.current?.rotateGesture(0);
+      scene.current?.target(null);
       notify(m);
       setCameraOn(false);
     };
     c.onFrame = (f) => {
       if (interactionBlocked.current) {
         recognizer.current.reset(f.time);
+        scene.current?.rotateGesture(0);
+        scene.current?.target(null);
+        if (cursor.current) cursor.current.style.opacity = "0";
         return;
       }
       const s = scene.current;
@@ -291,22 +301,30 @@ export default function App() {
         candidate: s.machine.candidate,
         hit: (x: number, y: number) =>
           s.targetAt(x * innerWidth, y * innerHeight),
+        returnHit: (x: number, y: number) => {
+          const button = gestureReturn.current;
+          if (!button || button.disabled) return false;
+          const rect = button.getBoundingClientRect();
+          return x * innerWidth >= rect.left && x * innerWidth <= rect.right &&
+            y * innerHeight >= rect.top && y * innerHeight <= rect.bottom;
+        },
         target: (id: string | null) => {
           if (s.machine.candidate !== id) s.target(id);
         },
-        pull: (id: string) => s.pull(id),
-        push: () => s.push(),
-        rotate: (v: number) => s.rotate(v),
+        pull: (id: string) => { s.pull(id); return s.machine.state === "PULLING"; },
+        push: () => { s.push(); return s.machine.state === "PUSHING"; },
+        rotate: (v: number) => s.rotateGesture(v),
       };
       if (f.landmarks.length) recognizer.current.process(f, ctx);
       else recognizer.current.lost(f.time, ctx);
       const d = recognizer.current.debug;
       if (cursor.current) {
         cursor.current.style.opacity = d.cursor ? "1" : "0";
+        cursor.current.dataset.locked = d.target ? "true" : "false";
         if (d.cursor)
           cursor.current.style.transform = `translate(${d.cursor.x * innerWidth}px,${d.cursor.y * innerHeight}px)`;
       }
-      if (f.time - lastDebug > 150) {
+      if (f.time - lastDebug > 80) {
         setGesture({ ...d });
         lastDebug = f.time;
       }
@@ -319,6 +337,7 @@ export default function App() {
   const toggleCamera = () => {
     if (cameraOn) {
       camera.current?.stop();
+      scene.current?.rotateGesture(0);
       recognizer.current.reset();
       scene.current?.target(null);
       setCameraOn(false);
@@ -507,7 +526,7 @@ export default function App() {
           </button>
           <button
             className="mobile-orbit icon-button"
-            disabled={reduced}
+            disabled={reduced || cameraOn}
             onClick={() => setAutoOrbit((v) => !v)}
             aria-label={autoOrbit ? "暂停自动漫游" : "开启自动漫游"}
           >
@@ -547,9 +566,9 @@ export default function App() {
               <img src={`/environments/${theme}-panorama.jpg`} alt="" />
               <span><small>空间主题</small>{THEMES[theme].name}</span><ChevronDown size={15}/>
             </button>
-            <button className="orbit-toggle" disabled={reduced} onClick={() => setAutoOrbit(v => !v)} aria-label={autoOrbit ? "暂停自动漫游" : "开启自动漫游"}>
+            <button className="orbit-toggle" disabled={reduced || cameraOn} onClick={() => setAutoOrbit(v => !v)} aria-label={autoOrbit ? "暂停自动漫游" : "开启自动漫游"}>
               {autoOrbit && !reduced ? <Pause size={13}/> : <Play size={13}/>}
-              {reduced ? "减少动态已开启" : !autoOrbit ? "漫游已暂停" : snapshot.orbiting ? "环绕漫游中" : "操作后继续漫游"}
+              {cameraOn ? "手势控制 · 漫游暂停" : reduced ? "减少动态已开启" : !autoOrbit ? "漫游已暂停" : snapshot.orbiting ? "环绕漫游中" : "操作后继续漫游"}
             </button>
           </div>
           <button
@@ -700,6 +719,32 @@ export default function App() {
           <span className="version">01 — ∞</span>
         </div>
       </footer>
+      {cameraOn && !interactionBlocked.current && (
+        <>
+          <aside className="gesture-guide" data-mode={gesture.mode} aria-label="摄像头手势指引">
+            <strong>{gesture.gesture}</strong>
+            {gesture.mode === "rotate" ? (
+              <>
+                <div className="gesture-joystick" aria-label="掌心相对中立点的偏移">
+                  <span className="joystick-center" />
+                  <i style={{ left: `${50 + gesture.deflection * 45}%` }} />
+                </div>
+                <small>左移保持 ← 回中停止 → 右移保持 · 伸食指选任意照片</small>
+              </>
+            ) : gesture.mode === "calibrating" ? (
+              <><progress value={gesture.progress} max={1} /><small>当前位置将成为中立点，小幅偏移就能持续旋转</small></>
+            ) : <small>张掌：旋转摇杆　·　单食指：全屏指向，停留 0.7 秒确认</small>}
+          </aside>
+          {snapshot.state === "FOCUSED" && (
+            <button ref={gestureReturn} className="gesture-return" aria-label="手势停留返回照片墙"
+              disabled={!["ASSEMBLED", "DISPERSED"].includes(snapshot.particles)}
+              onClick={() => scene.current?.push()}>
+              <ArrowLeft size={22} /><span>返回照片墙<small>食指指向这里，停留确认</small></span>
+              <progress value={gesture.mode === "return" ? gesture.progress : 0} max={1} />
+            </button>
+          )}
+        </>
+      )}
       <aside
         className={cameraOn ? "camera-preview visible" : "camera-preview"}
         aria-label="摄像头镜像预览"
@@ -711,6 +756,7 @@ export default function App() {
         </div>
         <p>
           {gesture.gesture}{" "}
+          {gesture.rotationSpeed !== 0 ? `· ${Math.round(Math.abs(gesture.rotationSpeed) * 180 / Math.PI)}°/s ` : ""}
           {gesture.progress > 0 ? `${Math.round(gesture.progress * 100)}%` : ""}
         </p>
       </aside>
@@ -718,7 +764,11 @@ export default function App() {
         ref={cursor}
         className={cameraOn ? "hand-cursor" : "hand-cursor hidden"}
       >
-        <div />
+        <div>
+          <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"
+            strokeDasharray="113.1" strokeDashoffset={113.1 * (1 - (gesture.mode === "select" || gesture.mode === "return" ? gesture.progress : 0))} /></svg>
+          <span>{gesture.progress > 0 && (gesture.mode === "select" || gesture.mode === "return") ? `${Math.round(gesture.progress * 100)}%` : "指向"}</span>
+        </div>
       </div>
       {debug && (
         <aside className="debug-panel">
@@ -737,9 +787,12 @@ export default function App() {
                 hand: gesture.status,
                 gesture: gesture.gesture,
                 candidate: snapshot.candidate?.name || null,
-                locked: gesture.locked,
+                pose: gesture.pose,
+                controlMode: gesture.mode,
+                dwellTarget: gesture.target,
+                neutral: gesture.neutral,
                 palmScale: +gesture.scale.toFixed(3),
-                pinch: +gesture.pinch.toFixed(2),
+                rotationSpeed: +gesture.rotationSpeed.toFixed(2),
                 progress: +gesture.progress.toFixed(2),
                 fps: +snapshot.fps.toFixed(1),
                 loaded: snapshot.loaded,
@@ -784,20 +837,20 @@ export default function App() {
             <Guide
               n="01"
               icon={<MoveHorizontal />}
-              title="挥手，浏览"
-              text="张开手掌向左或向右扒拉。停稳片刻后，再进行下一次挥动。"
+              title="张掌，摇杆浏览"
+              text="张掌停稳建立中立点，向左或向右偏移并保持即可持续旋转。偏移越大转得越快，回中停止，无需反复挥手。"
             />
             <Guide
               n="02"
               icon={<MousePointer2 />}
-              title="指向，后拉"
-              text="食指指向照片，停留至边缘亮起。捏合后将手向自己拉近，保持掌面朝向屏幕。"
+              title="食指，全屏选片"
+              text="食指自然伸出，其他三指稍弯即可，不必握紧，拇指位置不限。照片墙立即停转，指向任意照片并停留 0.7 秒，进度环填满后打开；移开取消。"
             />
             <Guide
               n="03"
               icon={<Hand />}
-              title="张掌，推回"
-              text="查看照片时，张开手掌并向屏幕前推；也可随时点击返回或按 Esc。"
+              title="停留，返回"
+              text="查看照片时，用食指光标停留在大号返回按钮上，填满进度环即可返回。也可点击按钮或按 Esc。"
             />
           </div>
           <div className="guide-note">

@@ -6,6 +6,7 @@ import type {
   ParticleState,
 } from "../../shared/types";
 import { InteractionMachine } from "../interaction/machine";
+import { GestureRotation } from "../interaction/gestureRotation";
 import { QUALITY, MOTION, SPACE } from "../config";
 import { PhotoResources } from "../resources/photos";
 import { photoPlane, createParticles } from "./particles";
@@ -66,6 +67,7 @@ export class GalleryScene {
   private captions = new PhotoCaptions();
   private columns = 5;
   private autoOrbit = true;
+  private gestureControl = false;
   private parallax = new THREE.Vector2();
   private resources: PhotoResources;
   private tiles: Tile[] = [];
@@ -82,6 +84,7 @@ export class GalleryScene {
   private frames = 0;
   private elapsed = 0;
   private speed = 0;
+  private gestureRotation = new GestureRotation();
   private lastInput = performance.now() - MOTION.idleDelayMs;
   private animation: Animation | null = null;
   private entries: Tile[] = [];
@@ -195,6 +198,13 @@ export class GalleryScene {
   setOrbiting(v: boolean) {
     this.autoOrbit = v;
     this.lastInput = performance.now() - MOTION.idleDelayMs;
+    this.emit();
+  }
+  setGestureControl(active: boolean) {
+    this.gestureControl = active;
+    this.speed = 0;
+    this.gestureRotation.clear();
+    this.lastInput = performance.now();
     this.emit();
   }
   private resize() {
@@ -424,12 +434,30 @@ export class GalleryScene {
   rotate(amount: number) {
     if (this.machine.busy || this.machine.state === "FOCUSED") return;
     this.lastInput = performance.now();
+    this.gestureRotation.clear();
     this.speed = THREE.MathUtils.clamp(
       amount,
       -MOTION.maxSpeed,
       MOTION.maxSpeed,
     );
     this.machine.target(null);
+  }
+  rotateGesture(speed: number) {
+    if (speed === 0) {
+      this.gestureRotation.clear();
+      if (this.gestureControl) this.speed = 0;
+      return;
+    }
+    if (this.machine.busy || this.machine.state === "FOCUSED" || this.drag) {
+      this.gestureRotation.clear();
+      return;
+    }
+    this.gestureRotation.set(speed, performance.now(), this.reduced);
+    if (speed) {
+      this.lastInput = performance.now();
+      this.speed = 0;
+      this.machine.target(null);
+    }
   }
   targetAt(x: number, y: number) {
     if (this.machine.busy || this.machine.state === "FOCUSED") return null;
@@ -585,6 +613,7 @@ export class GalleryScene {
     if (e.button !== 0 || this.machine.busy || this.machine.state === "FOCUSED")
       return;
     this.renderer.domElement.setPointerCapture(e.pointerId);
+    this.gestureRotation.clear();
     this.drag = {
       x: e.clientX,
       y: e.clientY,
@@ -648,6 +677,7 @@ export class GalleryScene {
   private cancel = () => {
     this.drag = null;
     this.speed = 0;
+    this.gestureRotation.clear();
   };
   private leave = () => {
     this.parallax.set(0, 0);
@@ -703,16 +733,16 @@ export class GalleryScene {
     this.frames++;
     this.elapsed += rawDt;
     if (!this.machine.busy && this.machine.state !== "FOCUSED" && !this.drag) {
-      this.wall.rotation.y -= this.speed * dt;
+      this.wall.rotation.y -= (this.speed + this.gestureRotation.step(now, dt)) * dt;
       this.speed *= Math.exp(-MOTION.damping * dt);
       if (
-        this.autoOrbit &&
+        this.autoOrbit && !this.gestureControl &&
         !this.reduced &&
         now - this.lastInput > MOTION.idleDelayMs &&
         !this.machine.candidate
       )
         this.wall.rotation.y -= MOTION.idleSpeed * dt;
-    }
+    } else this.gestureRotation.clear();
     if (!this.machine.busy && this.machine.state !== "FOCUSED") {
       this.camera.position.x = THREE.MathUtils.damp(
         this.camera.position.x,
@@ -824,7 +854,7 @@ export class GalleryScene {
             .project(this.camera).y
         : 0,
       orbiting:
-        this.autoOrbit &&
+        this.autoOrbit && !this.gestureControl &&
         !this.reduced &&
         !this.machine.busy &&
         this.machine.state !== "FOCUSED" &&
