@@ -33,7 +33,11 @@ node_modules/
 /design-qa.md
 /docs/*-qa.json
 /docs/VALIDATION*.md
-/docs/screenshots/
+# Keep only the public README screenshot; ignore other QA captures.
+/docs/screenshots/*
+!/docs/screenshots/v3/
+/docs/screenshots/v3/*
+!/docs/screenshots/v3/forest.png
 /docs/design-references/
 
 # Reproducible camera assets: restore with npm run setup:assets.
