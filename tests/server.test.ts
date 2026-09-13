@@ -206,6 +206,10 @@ test("multi-user isolation, restricted grants, verified completion, idempotency 
       completed.data.objectKey.startsWith(`photos/${alice.data.user.id}/`),
     );
     assert.equal(storage.objects.size, 3);
+    const prefix = `photos/${alice.data.user.id}/${completed.data.id}`;
+    assert.deepEqual([...storage.objects.keys()].sort(), [
+      `${prefix}/original`, `${prefix}/thumb.jpg`, `${prefix}/view.jpg`,
+    ]);
     const again = await request(
       `/api/uploads/${uploadId}/complete`,
       {},

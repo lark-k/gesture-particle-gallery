@@ -249,23 +249,25 @@ export default function App() {
     setCollectionOpen(false);
     const controller = new AbortController();
     void (async () => {
-      const sampleRes = await fetch("/samples/manifest.json", {
-        signal: controller.signal,
-      });
-      if (!sampleRes.ok)
-        throw new Error("示例照片未准备，请运行 npm run setup:assets。");
-      const samples = (await sampleRes.json()) as Photo[];
-      let own: Photo[] = [];
-      if (config.user && config.mode === "oss")
-        own = (
-          await api<{ photos: Photo[] }>(
-            "/api/photos",
-            undefined,
-            controller.signal,
-          )
-        ).photos;
+      let list: Photo[] = [];
+      if (config.user) {
+        if (config.mode === "oss")
+          list = (
+            await api<{ photos: Photo[] }>(
+              "/api/photos",
+              undefined,
+              controller.signal,
+            )
+          ).photos;
+      } else {
+        const sampleRes = await fetch("/samples/manifest.json", {
+          signal: controller.signal,
+        });
+        if (!sampleRes.ok)
+          throw new Error("示例照片未准备，请运行 npm run setup:assets。");
+        list = (await sampleRes.json()) as Photo[];
+      }
       if (generation !== accountGeneration.current) return;
-      const list = own.length ? own : samples;
       setPhotos(list);
       scene.current?.addPhotos(list);
     })().catch((e) => {
@@ -372,7 +374,7 @@ export default function App() {
       setActiveAccount(null);
       setConfig((c) => (c ? { ...c, user: null } : c));
       announceSessionChange();
-      notify("已退出，当前设备的本地照片已清除");
+      notify(config?.mode === "oss" ? "已退出，照片已保存在你的账户中" : "已退出，当前设备的本地照片已清除");
     } catch (e) {
       notify((e as Error).message);
     }
@@ -513,10 +515,6 @@ export default function App() {
           <span className="nav-slash">/</span> 360° GALLERY
         </div>
         <nav>
-          <span className="mode-badge">
-            <i />
-            {!config?.user ? "未登录 · 示例空间" : config?.mode === "oss" ? "私有云相册" : "本地演示模式"}
-          </span>
           <button
             className="icon-button help-top"
             onClick={() => setHelp(true)}
@@ -588,8 +586,12 @@ export default function App() {
           <div className="scene-hint">
             <span className="hint-dot" />
             {snapshot.candidate
-              ? `点击查看 · ${snapshot.candidate.name}`
-              : "拖动探索空间 · 点击拉近照片"}
+              ? snapshot.candidate.source === "sample"
+                ? `点击查看 · ${snapshot.candidate.name}`
+                : "点击查看照片"
+              : config?.user && snapshot.count === 0
+                ? "添加第一张照片，开启你的影像空间"
+                : "拖动探索空间 · 点击拉近照片"}
             <span className="hint-divider" />
             <button
               className="collection-count"
@@ -606,7 +608,7 @@ export default function App() {
           <span className="eyebrow">
             {busy ? "光影正在重构" : "A MOMENT, HELD STILL"}
           </span>
-          <h2>{snapshot.selected?.name}</h2>
+          {snapshot.selected?.source === "sample" && <h2>{snapshot.selected.name}</h2>}
           <p>
             {snapshot.selected?.width} × {snapshot.selected?.height}{" "}
             <span> / </span>
@@ -691,12 +693,6 @@ export default function App() {
         <p className="theme-introduction">选择保存在此浏览器。照片与账号权限保持独立。</p>
       </Modal>}
       <footer>
-        <span>
-          <i />{" "}
-          {config?.mode === "oss" ? "PRIVATE COLLECTION" : "LOCAL EXPERIENCE"}{" "}
-          <b> / </b>
-          {config?.mode === "oss" ? "仅当前账户可见" : "本地照片仅本次会话有效"}
-        </span>
         <div>
           <button onClick={() => setDebug((v) => !v)} aria-label="切换调试面板">
             <Settings2 size={14} />
@@ -965,19 +961,22 @@ export default function App() {
           close={() => setCollectionOpen(false)}
         >
           <p className="fine-print">
-            点击任意照片直接查看。较大的收藏会排入圆柱的其他层，均可从这里访问。
+            {photos.length === 0
+              ? "你的相册还是空的，添加第一张照片，留下属于你的记忆。"
+              : "点击任意照片直接查看。较大的收藏会排入圆柱的其他层，均可从这里访问。"}
           </p>
           <div className="collection-grid">
-            {photos.map((p) => (
+            {photos.map((p, index) => (
               <button
                 key={p.id}
+                aria-label={p.source === "sample" ? p.name : `查看第 ${index + 1} 张照片`}
                 onClick={() => {
                   setCollectionOpen(false);
                   void scene.current?.openPhoto(p.id);
                 }}
               >
                 <img src={p.thumbUrl} alt="" loading="lazy" />
-                <span>{p.name}</span>
+                {p.source === "sample" && <span>{p.name}</span>}
               </button>
             ))}
           </div>

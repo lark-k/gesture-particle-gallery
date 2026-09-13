@@ -36,6 +36,7 @@ export class OSSStorage implements Storage {
   constructor(private config: Config) {
     this.client = new OSS({
       region: config.region,
+      endpoint: config.endpoint || undefined,
       bucket: config.bucket,
       accessKeyId: config.accessKeyId,
       accessKeySecret: config.accessKeySecret,

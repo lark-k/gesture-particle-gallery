@@ -153,6 +153,8 @@ try {
   await page.getByLabel("密码", { exact: true }).fill("Only-for-local-QA-123!");
   await page.getByRole("button", { name: "创建账户", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("00 帧记忆")).toBeVisible();
+  const { mode } = await (await context.request.get(base + "/api/config")).json();
   await page.getByRole("button", { name: "添加照片" }).click();
   await page.getByLabel("选择照片").setInputFiles({
     name: "broken.jpg",
@@ -161,20 +163,20 @@ try {
   });
   await expect(page.getByRole("status")).toContainText("broken.jpg");
   await page.getByLabel("选择照片").setInputFiles("public/samples/5.jpg");
-  await expect(page.getByText("已加入本次会话 · 未上传云端")).toBeVisible({
-    timeout: 15000,
+  await expect(page.getByText(mode === "oss" ? "已保存至私有 OSS" : "已加入本次会话 · 未上传云端")).toBeVisible({
+    timeout: 60000,
   });
   await page.screenshot({ path: "docs/screenshots/05-local-upload.png" });
   await page.getByRole("button", { name: "返回影像空间" }).click();
-  await expect(page.getByText(`${sampleCount + 1} 帧记忆`)).toBeVisible();
+  await expect(page.getByText("01 帧记忆")).toBeVisible();
   checks.push(
-    "Real registration/login and local file decode, preview, upload mode labeling, particle entrance",
+    `Real registration/login, file decode, preview, ${mode} upload and particle entrance`,
   );
   await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByText(`${sampleCount} 帧记忆`)).toBeVisible();
+  await expect(page.getByText(mode === "oss" ? "01 帧记忆" : "00 帧记忆")).toBeVisible();
   await expect(page.getByRole("button", { name: username })).toBeVisible();
   checks.push(
-    "Account session persists on refresh; explicitly session-only local photo does not",
+    `Account session persists on refresh; ${mode === "oss" ? "OSS photo persists" : "local photo clears"}; no sample fallback`,
   );
   await page.getByRole("button", { name: username }).click();
   await expect(

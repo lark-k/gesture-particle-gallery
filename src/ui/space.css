@@ -96,21 +96,6 @@
 .mobile-orbit {
   display: none;
 }
-.mode-badge {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #9baaae;
-  font-size: 10px;
-}
-.mode-badge i,
-footer i {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #9dbbb1;
-}
 .primary {
   background: linear-gradient(145deg, #ede4d5ed, #bdb6a9e8);
   border: 1px solid #fff5dd6b;
@@ -506,22 +491,12 @@ footer {
   left: 42px;
   right: 42px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   color: #8a9aa3;
   font-size: 8px;
   letter-spacing: 1px;
   gap: 15px;
-}
-footer > span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-footer b {
-  font-weight: 400;
-  color: #59666e;
-  margin: 0 4px;
 }
 footer > div {
   display: flex;
@@ -658,13 +633,6 @@ footer button {
   .account svg {
     display: none;
   }
-  .mode-badge {
-    position: absolute;
-    top: 95px;
-    right: 0;
-    font-size: 8px;
-    gap: 5px;
-  }
   .intro {
     top: 142px;
     left: 23px;
@@ -759,15 +727,6 @@ footer button {
     letter-spacing: 0.2px;
     gap: 5px;
     align-items: flex-end;
-  }
-  footer > span {
-    max-width: 190px;
-    flex-wrap: wrap;
-    gap: 4px;
-    line-height: 1.8;
-  }
-  footer b {
-    margin: 0 2px;
   }
   footer > div {
     gap: 5px;

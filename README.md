@@ -16,7 +16,9 @@ npm run dev
 
 打开 **http://localhost:5188**。前端端口 5188，API 3188。使用这两个端口以避免本机其他开发项目的常见端口冲突。要修改端口，同时修改 `vite.config.ts` 的代理和 `.env` 的 `PORT` / `APP_ORIGIN`。
 
-无需填写任何密钥即可查看 25 张随项目提供的影像样例（20 张摄影与 5 张生成影像）。点击「登录 → 创建账户」注册本地账户，然后「添加照片」。本地照片经过真实解码并成为场景纹理；**仅本次页面会话有效，刷新、退出或切换账户即清除，不上传 OSS**。SQLite 会保存账户和会话。使用云模式时，照片元数据及 OSS 原图持久保存，重新登录/刷新仍可加载。
+未登录时可查看 25 张随项目提供的影像样例（20 张摄影与 5 张生成影像）。登录后只显示当前账户的照片；新账户显示空相册，不再回退或混入示例图片。退出后恢复示例空间。
+
+本地运行也可使用真实 OSS：在被 Git 忽略的 `.env` 中配置完整 OSS 凭证后运行 `npm run dev`，无需公网部署或将 `NODE_ENV` 改为 `production`。照片元数据保存在 SQLite，原图、展示图及缩略图持久保存在私有 OSS，刷新或重新登录后仍可加载。仅在开发时未配置 OSS 凭证，才使用会话内本地上传；生产环境缺少 OSS 配置会拒绝启动。
 
 `setup:assets` 生成/检查缩略图，下载 Google 官方手部模型，并把匹配当前 MediaPipe 版本的 WASM 拷贝到静态目录。已有样例原图不会重复下载。首次需要网络，完成后运行时没有外部 CDN 或字体依赖。网络受限时，可在可联网机器运行该命令，将 `public/mediapipe` 复制到部署项目。
 
@@ -58,6 +60,7 @@ Copy-Item .env.example .env
 | `PORT` | Node API / 成品静态站点端口，默认 3188 |
 | `DATABASE_PATH` | SQLite 文件，默认 `./data/gallery.sqlite` |
 | `OSS_REGION` | 例如 `oss-cn-hangzhou` |
+| `OSS_ENDPOINT` | 可选 HTTPS 地域端点，例如 `https://oss-cn-hangzhou.aliyuncs.com`，须与地域一致 |
 | `OSS_BUCKET` | 私有 Bucket 名 |
 | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 服务端受限 RAM 身份；可由部署平台注入 |
 | `OSS_STS_TOKEN` | 可选短期 STS 身份的安全令牌；需由外部凭证机制及时轮换 |
@@ -98,6 +101,8 @@ photos/{userId}/{photoId}/original
 photos/{userId}/{photoId}/view.jpg
 photos/{userId}/{photoId}/thumb.jpg
 ```
+
+OSS 按对象 Key 的 `/` 前缀显示目录，上传时自动形成用户目录及每张照片的子目录，无需预建空文件夹。用户目录使用服务端会话中的不可变用户 ID，不使用用户名或客户端提供的目录。示例素材仍随静态站点提供，不复制到用户的 OSS 目录。
 
 服务端校验的是实际下载的内容，并把校验后的字节写到另一个不可由浏览器写入的路径，防止签名未过期时覆盖已入库对象。缩略图与查看图去除源 EXIF；原文件仍可能包含拍摄位置等元数据，因此保持私有。
 
@@ -216,12 +221,15 @@ npm run test:browser
 npm run test:camera
 npm run test:lifecycle
 npm run test:session
+npm run test:samples
 npm run test:resilience
 npm run test:touch
 npm run test:space
 ```
 
 也可设置 `BROWSER_CHANNEL=chrome` 使用已安装 Chrome；脚本使用 Playwright，不依赖用户现有浏览器标签页。`TEST_URL` 可覆盖验证地址。测试会在开发数据库中注册 `qa_*` 测试账户，不能对真实生产站直接运行。
+
+`test:samples` 须先运行 `npm run build`；它启动独立临时服务并使用内存数据库，验证未登录示例、登录后空相册、刷新和跨标签页账户切换，不创建真实用户或上传 OSS 文件。其他上传类浏览器测试会按当前存储模式执行；配置了 OSS 时会实际上传。
 
 详细已验证与未验证清单见 [docs/VALIDATION.md](docs/VALIDATION.md)，机器可读结果见 [docs/browser-qa.json](docs/browser-qa.json) 与 [docs/camera-qa.json](docs/camera-qa.json)。真实摄像头动态手势、真实 OSS、长时间内存、移动设备和生产部署仍需按清单实测，不能用模拟关键点或测试存储替身代替这些结论。
 

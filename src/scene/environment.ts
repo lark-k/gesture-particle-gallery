@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-/** A single atlas for every wall caption, including new uploads. */
+/** A single atlas for the default sample photos' wall captions. */
 export class PhotoCaptions {
   private canvas = document.createElement("canvas");
   private ctx: CanvasRenderingContext2D;

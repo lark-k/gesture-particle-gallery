@@ -5,6 +5,7 @@ export interface Config {
   database: string;
   port: number;
   region: string;
+  endpoint: string;
   bucket: string;
   accessKeyId: string;
   accessKeySecret: string;
@@ -25,6 +26,7 @@ export function getConfig(): Config {
     database: process.env.DATABASE_PATH || "./data/gallery.sqlite",
     port: Number(process.env.PORT || 3188),
     region: process.env.OSS_REGION || "oss-cn-hangzhou",
+    endpoint: process.env.OSS_ENDPOINT || "",
     bucket: process.env.OSS_BUCKET || "",
     accessKeyId: process.env.OSS_ACCESS_KEY_ID || "",
     accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET || "",
@@ -45,6 +47,18 @@ export function getConfig(): Config {
     throw new Error("OSS 配置不完整；请完整配置或全部留空。");
   if (production && !c.origin.startsWith("https://"))
     throw new Error("生产环境 APP_ORIGIN 必须为 HTTPS。");
+  if (c.endpoint) {
+    const endpoint = new URL(c.endpoint);
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.hostname !== `${c.region}.aliyuncs.com` ||
+      endpoint.port || endpoint.username || endpoint.password ||
+      endpoint.pathname !== "/" || endpoint.search || endpoint.hash
+    )
+      throw new Error("OSS_ENDPOINT 必须为与 OSS_REGION 一致的 HTTPS 地域端点。");
+  }
+  if (production && !c.bucket)
+    throw new Error("生产环境必须配置 OSS 存储。");
   if (
     !Number.isFinite(c.maxBytes) ||
     c.maxBytes < 1024 ||

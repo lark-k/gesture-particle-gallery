@@ -6,7 +6,7 @@
 .topbar { border-bottom: 0; }
 .top-center { color: #e1e7ddba; font-size: 10px; }
 .brand-mark, .camera-control, .particle-button { color: var(--accent); }
-.brand small, .mode-badge, .account { color: #e5e8e0; }
+.brand small, .account { color: #e5e8e0; }
 .primary { background: linear-gradient(145deg, #e4e7dc35, #d3d6c51f); color: #f5f4e9 !important; border-color: #edf4e44d; backdrop-filter: blur(20px); box-shadow: inset 0 1px #ffffff29, 0 6px 20px #0002; }
 .primary:hover { background: #e4e7dc4d; }
 .intro { top: 136px; left: 48px; text-shadow: 0 2px 18px #06130b80; }

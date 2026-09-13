@@ -21,7 +21,7 @@ interface Tile {
   plane: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   edge: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
   outline: THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial>;
-  caption: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  caption?: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   home: THREE.Vector3;
   rotation: THREE.Quaternion;
   width: number;
@@ -277,8 +277,11 @@ export class GalleryScene {
           opacity: 0,
         }),
       );
-      const caption = this.captions.create(i, photo.name, width, height);
-      group.add(edge, plane, outline, caption);
+      const caption = photo.source === "sample"
+        ? this.captions.create(i, photo.name, width, height)
+        : undefined;
+      group.add(edge, plane, outline);
+      if (caption) group.add(caption);
       group.position.set(slot.x, slot.y, slot.z);
       group.rotation.y = slot.rotationY;
       this.wall.add(group);
@@ -794,8 +797,10 @@ export class GalleryScene {
       const focused = t.photo.id === this.machine.selected;
       const d = focused ? 1 : this.dim;
       t.plane.material.uniforms.uDim.value = d;
-      t.caption.visible = !focused && t.loaded && t.mix < 0.02;
-      t.caption.material.opacity = 0.85 * d;
+      if (t.caption) {
+        t.caption.visible = !focused && t.loaded && t.mix < 0.02;
+        t.caption.material.opacity = 0.85 * d;
+      }
       t.outline.material.opacity = THREE.MathUtils.damp(
         t.outline.material.opacity,
         t.photo.id === this.machine.candidate ? 0.75 : 0,
@@ -899,8 +904,8 @@ export class GalleryScene {
       t.edge.material.dispose();
       t.outline.geometry.dispose();
       t.outline.material.dispose();
-      t.caption.geometry.dispose();
-      t.caption.material.dispose();
+      t.caption?.geometry.dispose();
+      t.caption?.material.dispose();
     }
     this.stars.geometry.dispose();
     (this.stars.material as THREE.Material).dispose();

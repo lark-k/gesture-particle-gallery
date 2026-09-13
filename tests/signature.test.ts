@@ -8,6 +8,7 @@ test("actual OSS SDK emits V4 POST HMAC and V4 private image read URL offline", 
   const storage = new OSSStorage({
     ...getConfig(),
     region: "oss-cn-hangzhou",
+    endpoint: "https://oss-cn-hangzhou.aliyuncs.com",
     bucket: "test-only-bucket",
     accessKeyId: "test-only-access-id",
     accessKeySecret: secret,
@@ -15,6 +16,7 @@ test("actual OSS SDK emits V4 POST HMAC and V4 private image read URL offline", 
   });
   const grant = storage.grant("staging/user-a/fixed-id", "image/jpeg", 512);
   const f = grant.fields;
+  assert.equal(grant.host, "https://test-only-bucket.oss-cn-hangzhou.aliyuncs.com");
   assert.equal(f["x-oss-signature-version"], "OSS4-HMAC-SHA256");
   assert.equal("Signature" in f, false);
   const policy = JSON.parse(Buffer.from(f.policy, "base64").toString());
@@ -37,6 +39,7 @@ test("actual OSS SDK emits V4 POST HMAC and V4 private image read URL offline", 
     f["x-oss-signature"],
   );
   const url = new URL(await storage.read("photos/user-a/photo/view.jpg", 1600));
+  assert.equal(url.origin, grant.host);
   assert.equal(
     url.searchParams.get("x-oss-signature-version"),
     "OSS4-HMAC-SHA256",

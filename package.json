@@ -16,6 +16,7 @@
     "test:gesture": "node scripts/gesture-qa.mjs",
     "test:lifecycle": "node scripts/lifecycle-qa.mjs",
     "test:session": "node scripts/session-qa.mjs",
+    "test:samples": "tsx scripts/sample-visibility-qa.ts",
     "test:resilience": "node scripts/resilience-qa.mjs",
     "test:touch": "node scripts/touch-qa.mjs",
     "test:space": "node scripts/space-qa.mjs",

@@ -26,11 +26,13 @@ const register = async (page, name) => {
 try {
   await a.goto(base, { waitUntil: "networkidle" });
   await register(a, nameA);
+  await expect(a.getByRole("button", { name: "00 帧记忆" })).toBeVisible();
+  const { mode } = await (await context.request.get(base + "/api/config")).json();
   await a.getByRole("button", { name: "添加照片" }).click();
   await a.getByLabel("选择照片").setInputFiles("public/samples/1.jpg");
-  await expect(a.getByText("已加入本次会话 · 未上传云端")).toBeVisible();
+  await expect(a.getByText(mode === "oss" ? "已保存至私有 OSS" : "已加入本次会话 · 未上传云端")).toBeVisible({ timeout: 60000 });
   await a.getByRole("button", { name: "返回影像空间" }).click();
-  await expect(a.getByRole("button", { name: `${sampleCount + 1} 帧记忆` })).toBeVisible();
+  await expect(a.getByRole("button", { name: "01 帧记忆" })).toBeVisible();
   await b.goto(base, { waitUntil: "networkidle" });
   await expect(b.getByRole("button", { name: nameA })).toBeVisible();
   await b.getByRole("button", { name: nameA }).click();
@@ -40,7 +42,7 @@ try {
   await expect(a.getByRole("button", { name: `${sampleCount} 帧记忆` })).toBeVisible();
   await register(b, nameB);
   await expect(a.getByRole("button", { name: nameB })).toBeVisible();
-  await expect(a.getByRole("button", { name: `${sampleCount} 帧记忆` })).toBeVisible();
+  await expect(a.getByRole("button", { name: "00 帧记忆" })).toBeVisible();
   await a.getByRole("button", { name: nameB }).click();
   await expect(
     b.getByRole("button", { name: "登录", exact: true }),
@@ -50,11 +52,11 @@ try {
     checks: [
       "Two real browser tabs share a logged-in session",
       "Logout in tab B clears tab A account and local photo resources",
-      "Login as B updates tab A without reload; A photos do not carry over",
+      "Login as B updates tab A without reload; no samples or A photos carry over",
       "Logout propagates in the opposite direction",
     ],
     scope:
-      "Actual local API accounts, cookies, BroadcastChannel/storage events; no OSS credentials",
+      `Actual local API accounts, cookies, BroadcastChannel/storage events; storage mode: ${mode}`,
   };
   await writeFile("docs/session-qa.json", JSON.stringify(report, null, 2));
   console.log(report);
