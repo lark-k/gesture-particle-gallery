@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { uploadPhoto, type PreparedPhoto } from "../src/upload/client";
 const prepared = (): PreparedPhoto => ({
+  albumId: "album-a",
   file: new File(["image bytes"], "photo.jpg", { type: "image/jpeg" }),
   preview: "blob:test",
   local: {

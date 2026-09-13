@@ -5,7 +5,7 @@ export default defineConfig({
   server: {
     port: 5188,
     strictPort: true,
-    proxy: { "/api": "http://127.0.0.1:3188" },
+    proxy: { "/api": `http://127.0.0.1:${process.env.API_PORT || 3188}` },
   },
   worker: { format: "es" },
   build: { chunkSizeWarningLimit: 900 },

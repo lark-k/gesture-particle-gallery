@@ -28,3 +28,9 @@
 | meadow-light.hdr | [Hausdorf Meadow](https://polyhaven.com/a/hausdorf_meadow) | 阴天草原光照 |
 
 三份HDR合计约5.1MB，首次仅加载所选主题。JPEG用于视觉构图，HDR用于光照，两个用途明确分离；生成JPG不是测量得到的HDR、深度图或完整360度实拍全景。
+
+## 相册集封面与窗影（2026-09-13）
+
+`public/album-covers/` 中的 `meadow.webp`、`coast.webp`、`cat.webp`、`linen.webp` 和 `warm-window.webp` 均为使用 OpenAI ImageGen 专门生成的项目素材，不含用户照片。前三种为草地、海岸和午睡猫咪封面；亚麻纹理用于素色封面、书脊及内页，暖色窗影用于页面背景。森林与湖泊预设复用上述已生成的自然环境图。
+
+生产界面使用压缩 WebP，五份共约 967 KiB；PNG 原稿保存在被 Git 忽略的 `docs/design-references/album-materials/`。动态背景由本地图片配合 CSS 缓慢移动与鼠标视差实现，没有视频下载或第三方媒体请求。照片封面仍使用当前用户的授权读取地址。

@@ -110,6 +110,8 @@ test("multi-user isolation, restricted grants, verified completion, idempotency 
     assert.equal(bob.status, 201);
     assert.ok(alice.cookie);
     assert.notEqual(alice.data.user.id, bob.data.user.id);
+    const album = await request("/api/albums", { name: "Alice memories" }, alice.cookie);
+    assert.equal(album.status, 201);
     const staleAccount = await request(
       "/api/uploads/authorize",
       {},
@@ -154,6 +156,7 @@ test("multi-user isolation, restricted grants, verified completion, idempotency 
       .jpeg()
       .toBuffer();
     const body = {
+      albumId: album.data.id,
       name: "我的照片",
       mime: "image/jpeg",
       size: image.length,

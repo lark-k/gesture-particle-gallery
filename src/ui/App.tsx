@@ -26,7 +26,9 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import type { Photo, Quality } from "../../shared/types";
+import type { Album, Photo, Quality } from "../../shared/types";
+import { AlbumLibrary, type AlbumEntry, type LocalCover } from "./AlbumLibrary";
+import { BookTransition } from "./BookTransition";
 import { GalleryScene, type SceneSnapshot } from "../scene/GalleryScene";
 import { HandCamera } from "../gesture/camera";
 import { GestureRecognizer, type GestureDebug } from "../gesture/recognizer";
@@ -61,7 +63,16 @@ const initial: SceneSnapshot = {
   homeError: 0,
 };
 const qualityLabel = { low: "流畅", medium: "均衡", high: "精细" };
+const albumFromPath = () => location.pathname.match(/^\/albums\/([a-zA-Z0-9-]+)\/?$/)?.[1] || null;
 export default function App() {
+  const [albumId,setAlbumId] = useState<string|null>(albumFromPath);
+  const [album,setAlbum] = useState<Album|null>(null);
+  const [journey,setJourney] = useState<AlbumEntry|null>(null);
+  const [galleryError,setGalleryError] = useState("");
+  const [photosReady,setPhotosReady] = useState(false);
+  const [galleryRetry,setGalleryRetry] = useState(0);
+  const [totalPhotos,setTotalPhotos] = useState(0);
+  const localPhotos = useRef(new Map<string,Photo[]>()), localCovers = useRef(new Map<string,LocalCover>());
   const host = useRef<HTMLDivElement>(null),
     video = useRef<HTMLVideoElement>(null),
     cursor = useRef<HTMLDivElement>(null),
@@ -109,7 +120,7 @@ export default function App() {
   >([]);
   const [uploadBusy, setUploadBusy] = useState(false);
   const interactionBlocked = useRef(false);
-  interactionBlocked.current = help || authOpen || uploadOpen || collectionOpen || themeOpen;
+  interactionBlocked.current = help || authOpen || uploadOpen || collectionOpen || themeOpen || !!journey;
   const prepared = useRef(new Map<string, PreparedPhoto>()),
     localResources = useRef<PreparedPhoto[]>([]),
     abort = useRef<AbortController | null>(null),
@@ -120,6 +131,24 @@ export default function App() {
   const sessionChannel = useRef<BroadcastChannel | null>(null);
   const refreshSequence = useRef(0);
   const notify = (m: string) => setToast(m);
+  const returnToAlbums = () => {
+    abort.current?.abort(); camera.current?.stop(); setCameraOn(false);
+    setAlbumId(null);setAlbum(null);setJourney(null);setGalleryError("");
+    history.pushState({},"","/albums");
+  };
+  const enterAlbum = (entry:AlbumEntry) => {
+    setGalleryError("");setPhotosReady(false);setSnapshot(initial);setAlbum(entry.album);
+    setJourney(entry);setAlbumId(entry.album.id);
+    history.pushState({},"",`/albums/${entry.album.id}`);
+    window.scrollTo(0,0);
+  };
+  useEffect(()=>{
+    const pop=()=>{setAlbumId(albumFromPath());setJourney(null);setAlbum(null);setGalleryError("");};
+    window.addEventListener("popstate",pop);
+    const mq=matchMedia("(prefers-reduced-motion: reduce)");
+    const change=()=>setReduced(mq.matches);mq.addEventListener("change",change);
+    return()=>{window.removeEventListener("popstate",pop);mq.removeEventListener("change",change);};
+  },[]);
   const refresh = () => {
     const sequence = ++refreshSequence.current;
     return api<AppConfig>("/api/config")
@@ -184,24 +213,27 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
-    if (!host.current) return;
+    if (!host.current || (config?.user && !albumId)) return;
+    setSnapshot(initial);
+    setGalleryError("");
     let s: GalleryScene;
     try {
       s = new GalleryScene(host.current, quality, reduced);
     } catch {
       notify("无法初始化 WebGL 2，请启用浏览器硬件加速后重新加载。");
+      setGalleryError("无法初始化画廊，请启用浏览器硬件加速后重试。");
       return;
     }
     scene.current = s;
     s.onChange = (v) => setSnapshot((old) => ({ ...v, fps: v.fps || old.fps }));
-    s.onError = notify;
+    s.onError = m => { notify(m); setGalleryError(m); };
     s.onReturn = () => recognizer.current.reset();
     return () => {
       s.dispose();
       if (scene.current === s) scene.current = null;
     };
     // Recreate the entire GPU resource scope on account switch.
-  }, [config?.user?.id]);
+  }, [config?.user?.id, albumId, galleryRetry]);
   useEffect(() => {
     let cancelled = false;
     const current = scene.current;
@@ -216,7 +248,7 @@ export default function App() {
       if (!cancelled) setThemeError(e.message);
     }).finally(() => { if (!cancelled) setThemeLoading(false); });
     return () => { cancelled = true; };
-  }, [theme, themeRetry, config?.user?.id]);
+  }, [theme, themeRetry, config?.user?.id, albumId, galleryRetry]);
   useEffect(() => {
     scene.current?.setQuality(quality);
   }, [quality]);
@@ -225,13 +257,18 @@ export default function App() {
   }, [reduced]);
   useEffect(() => {
     scene.current?.setOrbiting(autoOrbit);
-  }, [autoOrbit, config?.user?.id]);
+  }, [autoOrbit, config?.user?.id, albumId, galleryRetry]);
   useEffect(() => {
     scene.current?.setGestureControl(cameraOn);
-  }, [cameraOn, config?.user?.id]);
+  }, [cameraOn, config?.user?.id, albumId, galleryRetry]);
   useEffect(() => {
     if (!config) return;
-    const generation = ++accountGeneration.current;
+    ++accountGeneration.current;
+    if (userId.current !== (config.user?.id || null)) {
+      // Preserve a direct album URL on initial login; clear it on an account switch.
+      if (userId.current) { setAlbumId(null); setAlbum(null); setJourney(null); history.replaceState({},"","/albums"); }
+      localPhotos.current.clear();localCovers.current.clear();
+    }
     userId.current = config.user?.id || null;
     abort.current?.abort();
     uploadLock.current = false;
@@ -247,18 +284,34 @@ export default function App() {
     setPhotos([]);
     setUploadOpen(false);
     setCollectionOpen(false);
+  }, [config?.user?.id, config?.mode]);
+  useEffect(() => {
+    if (!config || (config.user && !albumId)) return;
+    const generation = ++accountGeneration.current;
+    abort.current?.abort();uploadLock.current=false;setUploadBusy(false);setUploads([]);
+    prepared.current.forEach(p=>p.revoke());prepared.current.clear();
+    setUploadOpen(false);setCollectionOpen(false);setPhotos([]);setPhotosReady(false);
+    camera.current?.stop();setCameraOn(false);recognizer.current.reset();
     const controller = new AbortController();
     void (async () => {
       let list: Photo[] = [];
       if (config.user) {
+        const [a,summary] = await Promise.all([
+          api<Album>(`/api/albums/${albumId}`,undefined,controller.signal),
+          api<{totalPhotos:number}>("/api/albums",undefined,controller.signal),
+        ]);
+        if (controller.signal.aborted || generation!==accountGeneration.current) return;
+        setAlbum(a);
+        setTotalPhotos(config.mode==="local" ? [...localPhotos.current.values()].reduce((n,p)=>n+p.length,0) : summary.totalPhotos);
         if (config.mode === "oss")
           list = (
             await api<{ photos: Photo[] }>(
-              "/api/photos",
+              `/api/albums/${albumId}/photos`,
               undefined,
               controller.signal,
             )
           ).photos;
+        else list=localPhotos.current.get(albumId!)||[];
       } else {
         const sampleRes = await fetch("/samples/manifest.json", {
           signal: controller.signal,
@@ -270,11 +323,12 @@ export default function App() {
       if (generation !== accountGeneration.current) return;
       setPhotos(list);
       scene.current?.addPhotos(list);
+      setPhotosReady(true);
     })().catch((e) => {
-      if (e.name !== "AbortError") notify(e.message);
+      if (e.name !== "AbortError" && generation===accountGeneration.current) { notify(e.message); setGalleryError(e.message); }
     });
-    return () => controller.abort();
-  }, [config?.user?.id, config?.mode]);
+    return () => { controller.abort(); abort.current?.abort(); accountGeneration.current++; };
+  }, [config?.user?.id, config?.mode, albumId, galleryRetry]);
   useEffect(() => {
     if (!video.current) return;
     const c = new HandCamera(video.current);
@@ -335,7 +389,7 @@ export default function App() {
       c.stop();
       if (camera.current === c) camera.current = null;
     };
-  }, []);
+  }, [config?.user?.id, albumId]);
   const toggleCamera = () => {
     if (cameraOn) {
       camera.current?.stop();
@@ -388,6 +442,7 @@ export default function App() {
       setAuthOpen(true);
       return;
     }
+    if (!albumId) { notify("请先创建或选择相册集。"); return; }
     setUploadOpen(true);
   };
   const processPrepared = async (
@@ -407,11 +462,13 @@ export default function App() {
       if (config?.mode === "oss")
         photo = await uploadPhoto(p, (n, label) => update(n, label), signal);
       else {
-        photo = p.local;
+        photo = {...p.local,albumId:p.albumId};
         update(100, "已加入本次会话 · 未上传云端");
       }
       if (signal.aborted || generation !== accountGeneration.current) return;
       setPhotos((v) => [...v, photo]);
+      setTotalPhotos(v=>v+1);
+      if(config?.mode==="local" && p.albumId) localPhotos.current.set(p.albumId,[...(localPhotos.current.get(p.albumId)||[]),photo]);
       scene.current?.addPhotos([photo], true);
       if (config?.mode === "oss" && p.local.fullUrl)
         URL.revokeObjectURL(p.local.fullUrl);
@@ -424,12 +481,12 @@ export default function App() {
     }
   };
   const selectFiles = async (files: FileList | null) => {
-    if (!files?.length || uploadLock.current || !config?.user) return;
+    if (!files?.length || uploadLock.current || !config?.user || !albumId) return;
     if (files.length > 10) {
       notify("每批最多选择 10 张照片。");
       return;
     }
-    const own = photos.filter((p) => p.source !== "sample").length;
+    const own = totalPhotos;
     if (own + files.length > config.maxPhotos) {
       notify(`每个账户最多 ${config.maxPhotos} 张照片。`);
       return;
@@ -449,6 +506,7 @@ export default function App() {
         const id = crypto.randomUUID();
         try {
           const p = await preparePhoto(file, config.maxBytes);
+          p.albumId = albumId;
           if (
             controller.signal.aborted ||
             generation !== accountGeneration.current
@@ -498,8 +556,12 @@ export default function App() {
   const particleBusy = ["ASSEMBLING", "DISSOLVING"].includes(
     snapshot.particles,
   );
+  if (config?.user && !albumId) return <AlbumLibrary key={config.user.id} config={config} enter={enterAlbum}
+    logout={()=>void logout()} localPhotos={localPhotos.current} localCovers={localCovers.current} notice={toast}/>;
   return (
-    <main className={focused ? "app is-focused" : "app"} data-theme={theme}>
+    <main className={`${focused ? "app is-focused" : "app"}${albumId && config?.user ? " has-album" : ""}`} data-theme={theme}>
+      {albumId && config?.user && <><button className="album-back" onClick={returnToAlbums}><ArrowLeft size={16}/> 返回相册集</button><span className="gallery-album-title">{album?.name||"正在打开相册…"}</span></>}
+      {galleryError && !journey && config?.user && <div className="gallery-load-error" role="alert"><p>{galleryError}</p><button onClick={()=>setGalleryRetry(v=>v+1)}>重试加载</button><button onClick={returnToAlbums}>返回相册集</button></div>}
       <div className="ambient" />
       <header className="topbar">
         <a className="brand" href="/" aria-label="拾光首页">
@@ -984,7 +1046,7 @@ export default function App() {
       )}
       {uploadOpen && (
         <Modal
-          title="把你的瞬间，放进宇宙"
+          title={`上传到「${album?.name || "当前相册集"}」`}
           subtitle={
             config?.mode === "oss"
               ? "UPLOAD TO YOUR PRIVATE COLLECTION"
@@ -1060,6 +1122,10 @@ export default function App() {
           </button>
         </Modal>
       )}
+      {journey && <BookTransition entry={journey} background={`/environments/${theme}-panorama.jpg`}
+        ready={photosReady && snapshot.environment.ready && (photos.length===0 || snapshot.loaded>0) && !galleryError}
+        error={galleryError || themeError} reduced={reduced} complete={()=>setJourney(null)} cancel={returnToAlbums}
+        retry={()=>{setGalleryError("");setThemeError("");setGalleryRetry(v=>v+1);}}/>}
     </main>
   );
 }

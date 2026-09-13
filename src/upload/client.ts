@@ -26,9 +26,10 @@ export async function api<T = Record<string, unknown>>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
+  method?: "PATCH" | "DELETE",
 ): Promise<T> {
   const res = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
+    method: method || (body === undefined ? "GET" : "POST"),
     credentials: "same-origin",
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -43,13 +44,14 @@ export async function api<T = Record<string, unknown>>(
     .json()
     .catch(() => ({ error: "服务响应无效，请检查后端是否启动。" }));
   if (!res.ok) {
-    if (data.code === "ACCOUNT_CHANGED" && typeof window !== "undefined")
+    if ((data.code === "ACCOUNT_CHANGED" || (res.status === 401 && !path.startsWith("/api/auth/"))) && typeof window !== "undefined")
       window.dispatchEvent(new Event("stillspace:session-changed"));
     throw new ApiError(data.error || `请求失败 (${res.status})`, res.status);
   }
   return data;
 }
 export interface PreparedPhoto {
+  albumId?: string;
   file: File;
   preview: string;
   local: Photo;
@@ -173,6 +175,7 @@ export async function uploadPhoto(
   progress: (n: number, label: string) => void,
   signal: AbortSignal,
 ): Promise<Photo> {
+  if (!prepared.albumId) throw new Error("请先选择一个相册集。");
   let grant = prepared.uploadedGrant;
   if (!grant) {
     progress(0, "申请上传授权");
@@ -190,6 +193,7 @@ export async function uploadPhoto(
         mime: prepared.file.type,
         size: prepared.file.size,
         sha256,
+        albumId: prepared.albumId,
       },
       signal,
     );

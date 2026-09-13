@@ -10,7 +10,9 @@ import {
   type PhotoRow,
   type UploadRow,
   type UserRow,
+  type AlbumRow,
 } from "./db";
+import { ALBUM_COVERS, presetCover } from "../shared/covers";
 import { equalSecret, passwordHash, tokenHash, verifyPassword } from "./auth";
 import { OSSStorage, type Storage } from "./storage";
 import type { Config } from "./config";
@@ -153,6 +155,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
   };
   const dto = async (p: PhotoRow, size = 1920) => ({
     id: p.id,
+    albumId: p.album_id,
     name: p.name,
     width: p.width,
     height: p.height,
@@ -163,6 +166,106 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     thumbUrl: await storage!.read(p.thumb_key),
     fullUrl: await storage!.read(p.display_key, size),
     expiresAt: Date.now() + 900000,
+  });
+  const albumFor = (id: unknown, owner: string) => {
+    if (typeof id !== "string" || !id) throw new HttpError(400, "请先选择一个相册集。");
+    const album = db.prepare("SELECT * FROM albums WHERE id=? AND user_id=?").get(id, owner) as unknown as AlbumRow;
+    if (!album) throw new HttpError(404, "相册集不存在或无权访问。");
+    return album;
+  };
+  const albumDto = async (a: AlbumRow) => {
+    const cover = a.cover_photo_id ? db.prepare("SELECT * FROM photos WHERE id=? AND album_id=? AND user_id=?")
+      .get(a.cover_photo_id, a.id, a.user_id) as unknown as PhotoRow | undefined : undefined;
+    return {
+      id: a.id, name: a.name, description: a.description, coverPreset: a.cover_preset,
+      coverPhotoId: cover?.id || null, coverX: a.cover_x, coverY: a.cover_y,
+      coverUrl: cover && storage ? await storage.read(cover.thumb_key) : presetCover(a.cover_preset).url,
+      photoCount: (db.prepare("SELECT COUNT(*) AS n FROM photos WHERE album_id=? AND user_id=?").get(a.id, a.user_id) as { n: number }).n,
+      createdAt: a.created_at, updatedAt: a.updated_at,
+    };
+  };
+  // Persist failed object deletions so a storage outage cannot lose cleanup work.
+  let cleaning = false;
+  const cleanStorage = async () => {
+    if (!storage || cleaning) return;
+    cleaning = true;
+    try {
+      for (const row of db.prepare("SELECT object_key FROM storage_cleanup LIMIT 500").all()) {
+        try {
+          await storage.delete(String(row.object_key));
+          db.prepare("DELETE FROM storage_cleanup WHERE object_key=?").run(row.object_key);
+        } catch { /* Retried on the next list/delete request or server start. */ }
+      }
+    } finally { cleaning = false; }
+  };
+  void cleanStorage();
+  const validateAlbum = (body: Record<string, unknown>, current?: AlbumRow) => {
+    const name = typeof body.name === "string" ? body.name.trim() : current?.name;
+    const description = body.description === undefined ? current?.description || "" : body.description;
+    const preset = body.coverPreset === undefined ? current?.cover_preset || "meadow" : body.coverPreset;
+    const x = body.coverX === undefined ? current?.cover_x ?? 50 : body.coverX;
+    const y = body.coverY === undefined ? current?.cover_y ?? 50 : body.coverY;
+    if (!name || name.length > 60 || typeof description !== "string" || description.length > 240 ||
+      !ALBUM_COVERS.some(c => c.id === preset) || typeof x !== "number" || typeof y !== "number" ||
+      !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100)
+      throw new HttpError(400, "名称需为 1–60 字，简介最多 240 字，请选择有效封面。");
+    return { name, description, preset: String(preset), x, y };
+  };
+  app.get("/api/albums", async (req, res) => {
+    const u = requireUser(req);
+    const rows = db.prepare("SELECT * FROM albums WHERE user_id=? ORDER BY position,created_at,id").all(u.id) as unknown as AlbumRow[];
+    res.json({ albums: await Promise.all(rows.map(albumDto)), totalPhotos:
+      (db.prepare("SELECT COUNT(*) AS n FROM photos WHERE user_id=?").get(u.id) as { n: number }).n });
+    void cleanStorage();
+  });
+  app.post("/api/albums", async (req, res) => {
+    const u = requireUser(req), fields = validateAlbum(req.body || {});
+    const id = randomUUID(), now = new Date().toISOString();
+    const position = (db.prepare("SELECT COALESCE(MAX(position),-1)+1 AS n FROM albums WHERE user_id=?").get(u.id) as { n: number }).n;
+    db.prepare(`INSERT INTO albums(id,user_id,name,description,cover_preset,cover_x,cover_y,position,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,fields.name,fields.description,fields.preset,fields.x,fields.y,position,now,now);
+    res.status(201).json(await albumDto(albumFor(id,u.id)));
+  });
+  app.get("/api/albums/:id", async (req,res) => res.json(await albumDto(albumFor(req.params.id,requireUser(req).id))));
+  app.get("/api/albums/:id/photos", async (req,res) => {
+    const u = requireUser(req), a = albumFor(req.params.id,u.id);
+    const rows = db.prepare("SELECT * FROM photos WHERE album_id=? AND user_id=? ORDER BY created_at,id")
+      .all(a.id,u.id) as unknown as PhotoRow[];
+    res.json({ photos: storage ? await Promise.all(rows.map(p => dto(p))) : [] });
+  });
+  app.patch("/api/albums/:id", async (req,res) => {
+    const u = requireUser(req), a = albumFor(req.params.id,u.id), body = req.body || {};
+    const fields = validateAlbum(body,a);
+    const photoId = body.coverPhotoId === undefined ? a.cover_photo_id : body.coverPhotoId;
+    if (photoId !== null && (typeof photoId !== "string" || !db.prepare("SELECT id FROM photos WHERE id=? AND album_id=? AND user_id=?").get(photoId,a.id,u.id)))
+      throw new HttpError(400,"请使用当前相册集中的照片作为封面。");
+    db.prepare("UPDATE albums SET name=?,description=?,cover_preset=?,cover_photo_id=?,cover_x=?,cover_y=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(fields.name,fields.description,fields.preset,photoId,fields.x,fields.y,new Date().toISOString(),a.id,u.id);
+    res.json(await albumDto(albumFor(a.id,u.id)));
+  });
+  app.post("/api/albums/:id/feature", async (req,res) => {
+    const u = requireUser(req), a = albumFor(req.params.id,u.id);
+    db.prepare("UPDATE albums SET position=(SELECT COALESCE(MIN(position),0)-1 FROM albums WHERE user_id=?) WHERE id=? AND user_id=?")
+      .run(u.id,a.id,u.id);
+    res.json({ok:true});
+  });
+  app.delete("/api/albums/:id", async (req,res) => {
+    const u = requireUser(req), a = albumFor(req.params.id,u.id);
+    const tickets = db.prepare("SELECT * FROM uploads WHERE album_id=? AND user_id=?").all(a.id,u.id) as unknown as UploadRow[];
+    if (tickets.some(t => completing.has(t.id))) throw new HttpError(409,"相册中有照片正在完成上传，请稍后再删除。");
+    const photos = db.prepare("SELECT * FROM photos WHERE album_id=? AND user_id=?").all(a.id,u.id) as unknown as PhotoRow[];
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const enqueue = db.prepare("INSERT OR IGNORE INTO storage_cleanup VALUES(?)");
+      for (const p of photos) for (const key of [p.object_key,p.display_key,p.thumb_key]) enqueue.run(key);
+      for (const t of tickets) enqueue.run(t.object_key);
+      db.prepare("DELETE FROM uploads WHERE album_id=? AND user_id=?").run(a.id,u.id);
+      db.prepare("DELETE FROM photos WHERE album_id=? AND user_id=?").run(a.id,u.id);
+      db.prepare("DELETE FROM albums WHERE id=? AND user_id=?").run(a.id,u.id);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
+    await cleanStorage();
+    res.json({ok:true});
   });
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.get("/api/config", (req, res) => {
@@ -266,7 +369,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const u = requireUser(req);
     if (!storage)
       throw new HttpError(409, "当前为本地演示模式，没有上传到 OSS。");
-    const { name, mime, size, sha256 } = req.body || {};
+    const { name, mime, size, sha256, albumId } = req.body || {};
     if (
       typeof name !== "string" ||
       name.length < 1 ||
@@ -279,6 +382,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
       !/^[a-f0-9]{64}$/.test(sha256)
     )
       throw new HttpError(400, "文件格式、大小或校验值不正确。");
+    const album = albumFor(albumId, u.id);
     const n = db
       .prepare(
         "SELECT (SELECT COUNT(*) FROM photos WHERE user_id=?) + (SELECT COUNT(*) FROM uploads WHERE user_id=? AND photo_id IS NULL AND expires>?) AS n",
@@ -298,7 +402,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const id = randomUUID(),
       key = `staging/${u.id}/${id}`;
     const grant = storage.grant(key, mime, size);
-    db.prepare("INSERT INTO uploads VALUES(?,?,?,?,?,?,?,?,NULL)").run(
+    db.prepare("INSERT INTO uploads(id,user_id,object_key,name,mime,size,sha256,expires,photo_id,album_id) VALUES(?,?,?,?,?,?,?,?,NULL,?)").run(
       id,
       u.id,
       key,
@@ -307,6 +411,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
       size,
       sha256,
       Date.now() + 15 * 60000,
+      album.id,
     );
     res.json({ uploadId: id, ...grant });
   });
@@ -332,6 +437,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
       .prepare("SELECT * FROM uploads WHERE id=? AND user_id=?")
       .get(String(req.params.id), u.id) as unknown as UploadRow;
     if (!ticket) throw new HttpError(404, "上传凭证不存在或无权访问。");
+    albumFor(ticket.album_id, u.id);
     if (ticket.photo_id) {
       const p = db
         .prepare("SELECT * FROM photos WHERE id=? AND user_id=?")
@@ -412,7 +518,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
       const createdAt = new Date().toISOString();
       db.exec("BEGIN IMMEDIATE");
       try {
-        db.prepare("INSERT INTO photos VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+        db.prepare("INSERT INTO photos(id,user_id,name,object_key,display_key,thumb_key,width,height,size,created_at,album_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(
           id,
           u.id,
           ticket.name,
@@ -423,7 +529,9 @@ export function createApp(config: Config, injectedStorage?: Storage) {
           height,
           ticket.size,
           createdAt,
+          ticket.album_id,
         );
+        db.prepare("UPDATE albums SET updated_at=? WHERE id=? AND user_id=?").run(createdAt,ticket.album_id,u.id);
         db.prepare(
           "UPDATE uploads SET photo_id=? WHERE id=? AND user_id=?",
         ).run(id, ticket.id, u.id);

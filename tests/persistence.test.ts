@@ -15,7 +15,8 @@ test("SQLite retains owner, object keys and dimensions after close and reopen", 
       "hash",
       1,
     );
-    db.prepare("INSERT INTO photos VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+    db.prepare("INSERT INTO albums(id,user_id,name,created_at,updated_at) VALUES(?,?,?,?,?)").run("album-a","user-a","Memory","2026-09-12","2026-09-12");
+    db.prepare("INSERT INTO photos VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(
       "photo-a",
       "user-a",
       "sample",
@@ -26,6 +27,7 @@ test("SQLite retains owner, object keys and dimensions after close and reopen", 
       800,
       500,
       "2026-09-12",
+      "album-a",
     );
     db.close();
     const reopened = openDatabase(path);

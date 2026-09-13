@@ -1,5 +1,6 @@
 export interface Photo {
   id: string;
+  albumId?: string;
   name: string;
   width: number;
   height: number;
@@ -10,6 +11,19 @@ export interface Photo {
   source: "sample" | "local" | "oss";
   objectKey?: string;
   thumbKey?: string;
+}
+export interface Album {
+  id: string;
+  name: string;
+  description: string;
+  coverPreset: string;
+  coverPhotoId: string | null;
+  coverUrl: string;
+  coverX: number;
+  coverY: number;
+  photoCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 export type SceneState =
   | "OVERVIEW"
