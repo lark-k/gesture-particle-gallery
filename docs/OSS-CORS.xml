@@ -1,0 +1,13 @@
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://gallery.example.com</AllowedOrigin>
+    <AllowedOrigin>http://localhost:5188</AllowedOrigin>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedMethod>POST</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <ExposeHeader>x-oss-request-id</ExposeHeader>
+    <MaxAgeSeconds>600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>

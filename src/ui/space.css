@@ -1,0 +1,869 @@
+/* Full-screen gallery composition. Form and dialog primitives live in styles.css. */
+:root {
+  background: #080d11;
+  color: #e7e9e8;
+}
+.app {
+  --glass: linear-gradient(145deg, #71818b26, #1c272e70 48%, #0c151b9e);
+  --glass-border: #d6e3e42a;
+  position: relative;
+  height: 100dvh;
+  min-height: 540px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    #17222b 0%,
+    #0d151c 40%,
+    #080d11 79%
+  );
+}
+.scene {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  outline: none;
+  z-index: 0;
+}
+.scene canvas {
+  display: block;
+  touch-action: none;
+}
+.ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    linear-gradient(#080d11b8, transparent 26%, transparent 67%, #060b1094),
+    radial-gradient(ellipse at center, transparent 40%, #050a0e55 100%);
+}
+.topbar {
+  position: relative;
+  z-index: 4;
+  height: 88px;
+  margin: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid #d0d9d915;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+.brand-mark {
+  display: flex;
+  color: #c9bda7;
+}
+.brand > span:last-child {
+  font-family: "Songti SC", SimSun, serif;
+  font-size: 23px;
+  letter-spacing: 4px;
+}
+.brand small {
+  display: block;
+  font:
+    8px system-ui,
+    sans-serif;
+  letter-spacing: 3.8px;
+  color: #9ca8ae;
+  margin-top: 3px;
+}
+.top-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #98a5ac;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+}
+.nav-slash {
+  color: #57656d;
+  margin: 0 3px;
+}
+.topbar nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.mobile-orbit {
+  display: none;
+}
+.mode-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #9baaae;
+  font-size: 10px;
+}
+.mode-badge i,
+footer i {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #9dbbb1;
+}
+.primary {
+  background: linear-gradient(145deg, #ede4d5ed, #bdb6a9e8);
+  border: 1px solid #fff5dd6b;
+  color: #202623 !important;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 11px 18px;
+  box-shadow:
+    inset 0 1px 0 #ffffff70,
+    0 4px 18px #0003;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s;
+}
+.primary:hover {
+  background: #eee6d6;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 4px 22px #decbb11a;
+}
+.icon-button {
+  width: 38px;
+  height: 38px;
+  padding: 8px;
+  color: #a8b3b8;
+  border-radius: 50%;
+}
+.icon-button:hover {
+  background: #acbdc511;
+}
+.account {
+  min-height: 40px;
+  font-size: 11px;
+  color: #bbc4c6;
+  padding: 8px 0;
+}
+.account span {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.intro {
+  position: absolute;
+  top: 127px;
+  left: 42px;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 0.5s;
+}
+.eyebrow {
+  color: #a99b84;
+  font-size: 9px;
+  letter-spacing: 2.3px;
+}
+.intro .eyebrow {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+.eyebrow > span {
+  display: inline-block;
+  width: 22px;
+  height: 1px;
+  background: #ac9e7e66;
+}
+.intro h1 {
+  font:
+    400 34px/1.45 "Songti SC",
+    SimSun,
+    serif;
+  letter-spacing: 4px;
+  margin: 15px 0 10px;
+}
+.intro h1 em {
+  font-style: normal;
+  color: #d7c6aa;
+}
+.title-period {
+  color: #a19583;
+}
+.intro p {
+  color: #96a2a9;
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  margin: 0;
+}
+.exhibition-label {
+  position: absolute;
+  z-index: 2;
+  right: 43px;
+  top: 133px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: right;
+  color: #88969e;
+  font-size: 10px;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+.exhibition-index {
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: #a2947e;
+}
+.exhibition-label strong {
+  font:
+    400 20px "Songti SC",
+    SimSun,
+    serif;
+  letter-spacing: 4px;
+  color: #d3d5d1;
+  margin: 3px 0;
+}
+.orbit-arrow {
+  position: absolute;
+  top: 48%;
+  z-index: 3;
+  width: 42px;
+  height: 56px;
+  border-radius: 24px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: #c4cdce;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 #ffffff12,
+    0 6px 18px #0003;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.orbit-arrow:hover {
+  background: #6b7e8740;
+  border-color: #c6d3d457;
+}
+.orbit-arrow.left {
+  left: 26px;
+}
+.orbit-arrow.right {
+  right: 26px;
+}
+.orbit-arrow svg {
+  width: 16px;
+  stroke-width: 1.4;
+}
+.scene-hint {
+  position: absolute;
+  bottom: 158px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #b2bdc0;
+  font-size: 10px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 2px 12px #000;
+}
+.hint-dot {
+  width: 4px;
+  height: 4px;
+  background: #cab592;
+  border-radius: 50%;
+}
+.hint-divider {
+  width: 1px;
+  height: 11px;
+  background: #b9c8cf30;
+  margin: 0 4px;
+}
+.collection-count {
+  border-bottom: 1px solid #c9b48f50;
+  padding: 5px 0;
+  color: #d4c4a9;
+  min-height: 30px;
+}
+.space-navigation {
+  position: absolute;
+  z-index: 2;
+  bottom: 89px;
+  left: 33px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.orbit-map {
+  width: 77px;
+  height: 77px;
+  overflow: visible;
+}
+.map-boundary {
+  stroke: #8b9ba333;
+  stroke-width: 0.7;
+  fill: none;
+}
+.map-inner {
+  stroke: #8b9ba323;
+  stroke-width: 0.7;
+  fill: none;
+  stroke-dasharray: 1 4;
+}
+.map-view {
+  fill: #b5c9c808;
+  stroke: #abbeb91e;
+  stroke-width: 0.6;
+}
+.map-photos {
+  transform: rotate(var(--orbit-angle, 0rad));
+  transform-origin: 44px 44px;
+  stroke: #b9ab91;
+  stroke-width: 2;
+}
+.map-eye {
+  fill: #dcd5c4;
+}
+.space-label {
+  display: block;
+  font-size: 11px;
+  color: #c0c8c8;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
+}
+.orbit-toggle {
+  padding: 5px 0;
+  min-height: 30px;
+  gap: 6px;
+  color: #98a7af;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+.orbit-toggle:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.bottom-controls {
+  position: absolute;
+  z-index: 3;
+  bottom: 67px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+.toolbar {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  min-height: 58px;
+  padding: 6px 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: 15px;
+  white-space: nowrap;
+  background: var(--glass);
+  backdrop-filter: blur(28px) saturate(125%);
+  -webkit-backdrop-filter: blur(28px) saturate(125%);
+  box-shadow:
+    inset 0 1px 0 #efffff24,
+    inset 0 -1px 0 #030b1266,
+    0 10px 42px #0006,
+    0 2px 8px #0003;
+}
+.toolbar::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 18%;
+  right: 18%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #e2f0e86b, transparent);
+  pointer-events: none;
+}
+.toolbar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    #f6eee509,
+    transparent 33%,
+    transparent 70%,
+    #c3e0ee08
+  );
+}
+.toolbar button {
+  min-height: 38px;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 7px;
+  transition: background 0.2s;
+}
+.toolbar button:hover:not(:disabled) {
+  background: #b9ccd512;
+}
+.camera-control {
+  color: #e0d1b8;
+}
+.control-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #738890;
+  margin-left: 5px;
+}
+.active .control-dot {
+  background: #b1d1b7;
+  box-shadow: 0 0 8px #b1d1b74d;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #c8d5dc25;
+}
+.mouse-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: #a2b0b8;
+}
+.privacy-note {
+  font-size: 9px;
+  color: #89979e;
+  letter-spacing: 0.8px;
+  margin: 12px 0 0;
+}
+.is-focused .intro {
+  opacity: 0;
+}
+.focus-meta {
+  position: absolute;
+  bottom: 151px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  z-index: 2;
+  pointer-events: none;
+  max-width: 85%;
+}
+.focus-meta .eyebrow {
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+.focus-meta h2 {
+  font:
+    400 23px "Songti SC",
+    SimSun,
+    serif;
+  letter-spacing: 3px;
+  margin: 10px 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-meta p {
+  color: #8c9ca5;
+  font-size: 9px;
+  letter-spacing: 1px;
+  margin: 0;
+}
+.focus-meta p span {
+  margin: 0 10px;
+  color: #53636b;
+}
+.focus-toolbar {
+  gap: 20px;
+}
+.focus-toolbar kbd {
+  border: 1px solid #ffffff22;
+  border-radius: 4px;
+  color: #9eaeb5;
+  font-size: 9px;
+  padding: 2px 4px;
+  margin-left: 4px;
+}
+.particle-button {
+  color: #ddc7a4;
+}
+footer {
+  position: absolute;
+  z-index: 3;
+  bottom: 23px;
+  left: 42px;
+  right: 42px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #8a9aa3;
+  font-size: 8px;
+  letter-spacing: 1px;
+  gap: 15px;
+}
+footer > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+footer b {
+  font-weight: 400;
+  color: #59666e;
+  margin: 0 4px;
+}
+footer > div {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+footer button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  color: #a4b0b7;
+}
+.quality-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+}
+.quality-select select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #c0c9ce;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 7px 2px;
+}
+.quality-select option {
+  background: #14202a;
+}
+.version {
+  border-left: 1px solid #ffffff18;
+  padding-left: 16px;
+  color: #b3b6b4;
+}
+.modal {
+  background: linear-gradient(145deg, #34414bed, #121b24f5);
+  border-color: #cbdcdd38;
+  backdrop-filter: blur(32px) saturate(120%);
+  -webkit-backdrop-filter: blur(32px) saturate(120%);
+  box-shadow:
+    inset 0 1px 0 #ffffff21,
+    0 35px 100px #0009;
+  border-radius: 18px;
+}
+.modal-backdrop {
+  background: #03070ba8;
+  backdrop-filter: blur(9px);
+}
+.debug-panel {
+  background: #0d1722ed;
+}
+.camera-preview {
+  bottom: 207px;
+  left: 40px;
+  background: #15232cbd;
+  backdrop-filter: blur(18px);
+  border-radius: 12px;
+}
+.camera-preview.visible ~ .space-navigation {
+  opacity: 0.5;
+}
+
+@media (max-width: 1200px) {
+  .top-center {
+    display: none;
+  }
+  .topbar {
+    margin: 0 30px;
+  }
+  .intro {
+    left: 32px;
+  }
+  .exhibition-label {
+    right: 32px;
+  }
+  .space-navigation {
+    left: 24px;
+    gap: 7px;
+  }
+  .space-navigation > div {
+    display: none;
+  }
+  footer {
+    left: 32px;
+    right: 32px;
+  }
+}
+@media (max-width: 700px) {
+  .app {
+    min-height: 520px;
+  }
+  .topbar {
+    height: 77px;
+    margin: 0 20px;
+    gap: 12px;
+  }
+  .brand {
+    gap: 8px;
+  }
+  .brand > span:last-child {
+    font-size: 20px;
+    letter-spacing: 3px;
+  }
+  .brand small {
+    font-size: 6px;
+    letter-spacing: 2.5px;
+  }
+  .brand-mark svg {
+    width: 23px;
+  }
+  .topbar nav {
+    gap: 14px;
+  }
+  .help-top {
+    display: none;
+  }
+  .mobile-orbit {
+    display: inline-flex;
+    width: 27px;
+    padding: 5px;
+  }
+  .primary.upload-top {
+    padding: 9px 12px;
+    font-size: 10px;
+    gap: 4px;
+  }
+  .account {
+    font-size: 10px;
+  }
+  .account span {
+    max-width: 45px;
+  }
+  .account svg {
+    display: none;
+  }
+  .mode-badge {
+    position: absolute;
+    top: 95px;
+    right: 0;
+    font-size: 8px;
+    gap: 5px;
+  }
+  .intro {
+    top: 142px;
+    left: 23px;
+  }
+  .intro .eyebrow {
+    font-size: 7px;
+    letter-spacing: 1.5px;
+  }
+  .intro h1 {
+    font-size: 28px;
+    letter-spacing: 2px;
+    margin: 13px 0 10px;
+  }
+  .intro p {
+    font-size: 9px;
+    letter-spacing: 0.8px;
+  }
+  .exhibition-label {
+    display: none;
+  }
+  .orbit-arrow {
+    width: 34px;
+    height: 48px;
+    top: 45%;
+  }
+  .orbit-arrow.left {
+    left: 12px;
+  }
+  .orbit-arrow.right {
+    right: 12px;
+  }
+  .space-navigation {
+    display: none;
+  }
+  .scene-hint {
+    bottom: 167px;
+    font-size: 8px;
+    letter-spacing: 0.3px;
+    gap: 5px;
+  }
+  .scene-hint .hint-divider {
+    margin: 0 2px;
+  }
+  .bottom-controls {
+    bottom: 82px;
+    width: max-content;
+    max-width: calc(100% - 24px);
+  }
+  .toolbar {
+    min-height: 56px;
+    padding: 5px 8px;
+    gap: 9px;
+    border-radius: 14px;
+  }
+  .toolbar button {
+    font-size: 11px;
+    padding: 6px;
+    gap: 6px;
+  }
+  .toolbar .mouse-mode {
+    font-size: 8px;
+    gap: 5px;
+  }
+  .toolbar .mouse-mode svg {
+    width: 12px;
+  }
+  .toolbar .icon-button {
+    width: 28px;
+  }
+  .privacy-note {
+    font-size: 8px;
+    letter-spacing: 0.4px;
+    margin-top: 12px;
+  }
+  .control-dot {
+    margin-left: 0;
+  }
+  .focus-meta {
+    bottom: 164px;
+  }
+  .focus-meta h2 {
+    font-size: 21px;
+  }
+  .focus-meta p {
+    font-size: 8px;
+  }
+  footer {
+    left: 21px;
+    right: 21px;
+    bottom: 20px;
+    font-size: 7px;
+    letter-spacing: 0.2px;
+    gap: 5px;
+    align-items: flex-end;
+  }
+  footer > span {
+    max-width: 190px;
+    flex-wrap: wrap;
+    gap: 4px;
+    line-height: 1.8;
+  }
+  footer b {
+    margin: 0 2px;
+  }
+  footer > div {
+    gap: 5px;
+  }
+  footer button {
+    min-width: 30px;
+  }
+  .quality-select {
+    font-size: 8px;
+  }
+  .quality-select select {
+    font-size: 9px;
+  }
+  .version {
+    display: none;
+  }
+  .modal {
+    padding: 30px 22px;
+  }
+  .modal h2 {
+    font-size: 22px;
+  }
+  .guide-grid {
+    gap: 15px;
+  }
+  .guide p,
+  .guide-note p {
+    font-size: 10px;
+  }
+  .guide h3 {
+    font-size: 11px;
+  }
+  .camera-preview {
+    left: auto;
+    right: 20px;
+    top: 130px;
+    bottom: auto;
+    width: 100px;
+  }
+  .camera-preview video {
+    height: 67px;
+  }
+  .camera-preview > div {
+    font-size: 7px;
+    padding: 5px 6px 0;
+  }
+  .camera-preview p {
+    margin: 4px 6px;
+    font-size: 8px;
+  }
+  .toast {
+    top: 115px;
+    width: max-content;
+    font-size: 11px;
+  }
+  .debug-panel {
+    right: 14px;
+    top: 220px;
+    max-height: 47%;
+    width: 260px;
+  }
+  .dropzone {
+    padding: 24px 12px;
+  }
+}
+@media (max-height: 720px) and (min-width: 701px) {
+  .topbar {
+    height: 73px;
+  }
+  .intro {
+    top: 102px;
+  }
+  .intro h1 {
+    font-size: 27px;
+  }
+  .exhibition-label {
+    top: 105px;
+  }
+  .bottom-controls {
+    bottom: 51px;
+  }
+  .scene-hint {
+    bottom: 139px;
+  }
+  .space-navigation {
+    bottom: 60px;
+  }
+  .focus-meta {
+    bottom: 128px;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .toolbar,
+  .modal,
+  .orbit-arrow {
+    backdrop-filter: none;
+    background: #1b2730;
+  }
+}

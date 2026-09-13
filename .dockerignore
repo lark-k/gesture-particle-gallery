@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-server
+data
+.git
+.codegraph
+.env
+.env.*
+!.env.example
+docs/screenshots
+test-results
+tmp

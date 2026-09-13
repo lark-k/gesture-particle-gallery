@@ -1,0 +1,59 @@
+# Dependencies and generated builds
+node_modules/
+/dist/
+/dist-server/
+*.tsbuildinfo
+.vite/
+
+# Local secrets (keep the configuration template)
+.env
+.env.*
+!.env.example
+
+# User data, databases and runtime logs
+/data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.log
+
+# Generated QA evidence and local design review artifacts.
+# Keep tests/ and scripts/*-qa.mjs: package.json uses these test sources.
+/coverage/
+/.nyc_output/
+/test-results/
+/playwright-report/
+/blob-report/
+/design-qa.md
+/docs/*-qa.json
+/docs/VALIDATION*.md
+/docs/screenshots/
+/docs/design-references/
+
+# Reproducible camera assets: restore with npm run setup:assets.
+# Do NOT ignore public/samples/ or public/environments/: logged-out demo
+# photos, thumbnails, panoramas, sprites and HDR lighting must ship in Git.
+# Keep docs/ASSETS.md for asset provenance and licensing.
+/public/mediapipe/
+
+# Local caches, scratch files and code index
+/tmp/
+/temp/
+/.cache/
+/.codegraph/
+
+# Editor and OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
