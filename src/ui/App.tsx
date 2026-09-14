@@ -32,7 +32,7 @@ import { BookTransition } from "./BookTransition";
 import { GalleryScene, type SceneSnapshot } from "../scene/GalleryScene";
 import { HandCamera } from "../gesture/camera";
 import { GestureRecognizer, type GestureDebug } from "../gesture/recognizer";
-import { THEMES, savedTheme, type ThemeId } from "../scene/themes";
+import { THEMES, savedTheme, parseTheme, type ThemeId } from "../scene/themes";
 import { GESTURE, QUALITY } from "../config";
 import {
   api,
@@ -92,6 +92,7 @@ export default function App() {
   );
   const [theme, setTheme] = useState<ThemeId>(savedTheme);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [themeSaving, setThemeSaving] = useState(false);
   const [themeLoading, setThemeLoading] = useState(false);
   const [themeRetry, setThemeRetry] = useState(0);
   const [themeError, setThemeError] = useState("");
@@ -134,16 +135,18 @@ export default function App() {
   const returnToAlbums = () => {
     abort.current?.abort(); camera.current?.stop(); setCameraOn(false);
     setAlbumId(null);setAlbum(null);setJourney(null);setGalleryError("");
+    setThemeOpen(false);setThemeSaving(false);
     history.pushState({},"","/albums");
   };
   const enterAlbum = (entry:AlbumEntry) => {
     setGalleryError("");setPhotosReady(false);setSnapshot(initial);setAlbum(entry.album);
+    setTheme(parseTheme(entry.album.theme));setThemeOpen(false);setThemeSaving(false);
     setJourney(entry);setAlbumId(entry.album.id);
     history.pushState({},"",`/albums/${entry.album.id}`);
     window.scrollTo(0,0);
   };
   useEffect(()=>{
-    const pop=()=>{setAlbumId(albumFromPath());setJourney(null);setAlbum(null);setGalleryError("");};
+    const pop=()=>{setAlbumId(albumFromPath());setJourney(null);setAlbum(null);setGalleryError("");setThemeOpen(false);setThemeSaving(false);};
     window.addEventListener("popstate",pop);
     const mq=matchMedia("(prefers-reduced-motion: reduce)");
     const change=()=>setReduced(mq.matches);mq.addEventListener("change",change);
@@ -237,18 +240,20 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const current = scene.current;
-    if (!current) return;
+    if (!current || (config?.user && (!albumId || album?.id !== albumId))) return;
     setThemeLoading(true);
     setThemeError("");
     current.setTheme(theme).then((complete) => {
       if (cancelled) return;
       if (!complete) setThemeError("部分环境素材未能加载，可重试补全；照片仍可操作。");
-      try { localStorage.setItem("stillspace:theme", theme); } catch { /* Session choice still works. */ }
+      if (!config?.user) {
+        try { localStorage.setItem("stillspace:theme", theme); } catch { /* Session choice still works. */ }
+      }
     }).catch((e: Error) => {
       if (!cancelled) setThemeError(e.message);
     }).finally(() => { if (!cancelled) setThemeLoading(false); });
     return () => { cancelled = true; };
-  }, [theme, themeRetry, config?.user?.id, albumId, galleryRetry]);
+  }, [theme, themeRetry, config?.user?.id, albumId, album?.id, galleryRetry]);
   useEffect(() => {
     scene.current?.setQuality(quality);
   }, [quality]);
@@ -270,6 +275,8 @@ export default function App() {
       localPhotos.current.clear();localCovers.current.clear();
     }
     userId.current = config.user?.id || null;
+    if (!config.user) setTheme(savedTheme());
+    setThemeOpen(false);setThemeSaving(false);
     abort.current?.abort();
     uploadLock.current = false;
     setUploadBusy(false);
@@ -302,6 +309,7 @@ export default function App() {
         ]);
         if (controller.signal.aborted || generation!==accountGeneration.current) return;
         setAlbum(a);
+        setTheme(parseTheme(a.theme));
         setTotalPhotos(config.mode==="local" ? [...localPhotos.current.values()].reduce((n,p)=>n+p.length,0) : summary.totalPhotos);
         if (config.mode === "oss")
           list = (
@@ -400,6 +408,22 @@ export default function App() {
     } else {
       setCameraOn(true);
       void camera.current?.start();
+    }
+  };
+  const chooseTheme = async (id: ThemeId) => {
+    if (themeSaving) return;
+    if (!config?.user) { setTheme(id);setThemeOpen(false);return; }
+    if (!albumId || album?.id !== albumId) return;
+    const generation=accountGeneration.current;
+    setThemeSaving(true);
+    try {
+      const saved=await api<Album>(`/api/albums/${albumId}`,{theme:id},undefined,"PATCH");
+      if (!mounted.current || generation!==accountGeneration.current) return;
+      setAlbum(saved);setTheme(parseTheme(saved.theme));setThemeOpen(false);
+    } catch(e) {
+      if (mounted.current && generation===accountGeneration.current) notify(`空间主题保存失败：${(e as Error).message}`);
+    } finally {
+      if (mounted.current && generation===accountGeneration.current) setThemeSaving(false);
     }
   };
   const authenticate = async (e: FormEvent<HTMLFormElement>) => {
@@ -746,13 +770,13 @@ export default function App() {
         <p className="theme-introduction">三种自然空间，环绕同一份影像收藏。</p>
         <div className="theme-options">
           {(Object.entries(THEMES) as [ThemeId, typeof THEMES[ThemeId]][]).map(([id, item], i) =>
-            <button key={id} className={theme === id ? "theme-option selected" : "theme-option"} aria-pressed={theme === id} onClick={() => { setTheme(id); setThemeOpen(false); }}>
+            <button key={id} className={theme === id ? "theme-option selected" : "theme-option"} aria-pressed={theme === id} disabled={themeSaving || (!!config?.user && album?.id !== albumId)} onClick={() => void chooseTheme(id)}>
               <img src={`/environments/${id}-panorama.jpg`} alt={item.description}/>
               <span><small>0{i + 1}{id === "forest" ? " · 默认" : ""}</small><strong>{item.name}</strong><span>{item.description}</span></span>
               {theme === id && <Check size={18}/>}
             </button>)}
         </div>
-        <p className="theme-introduction">选择保存在此浏览器。照片与账号权限保持独立。</p>
+        <p className="theme-introduction" role="status">{themeSaving ? "正在保存空间主题…" : config?.user ? "选择会保存在当前相册，下次进入时自动恢复。" : "选择保存在此浏览器。照片与账号权限保持独立。"}</p>
       </Modal>}
       <footer>
         <div>
@@ -1123,7 +1147,7 @@ export default function App() {
         </Modal>
       )}
       {journey && <BookTransition entry={journey} background={`/environments/${theme}-panorama.jpg`}
-        ready={photosReady && snapshot.environment.ready && (photos.length===0 || snapshot.loaded>0) && !galleryError}
+        ready={photosReady && snapshot.environment.ready && snapshot.environment.theme===theme && (photos.length===0 || snapshot.loaded>0) && !galleryError}
         error={galleryError || themeError} reduced={reduced} complete={()=>setJourney(null)} cancel={returnToAlbums}
         retry={()=>{setGalleryError("");setThemeError("");setGalleryRetry(v=>v+1);}}/>}
     </main>

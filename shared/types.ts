@@ -16,6 +16,7 @@ export interface Album {
   id: string;
   name: string;
   description: string;
+  theme: "forest" | "lake" | "meadow";
   coverPreset: string;
   coverPhotoId: string | null;
   coverUrl: string;

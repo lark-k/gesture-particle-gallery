@@ -177,7 +177,7 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const cover = a.cover_photo_id ? db.prepare("SELECT * FROM photos WHERE id=? AND album_id=? AND user_id=?")
       .get(a.cover_photo_id, a.id, a.user_id) as unknown as PhotoRow | undefined : undefined;
     return {
-      id: a.id, name: a.name, description: a.description, coverPreset: a.cover_preset,
+      id: a.id, name: a.name, description: a.description, theme: a.space_theme, coverPreset: a.cover_preset,
       coverPhotoId: cover?.id || null, coverX: a.cover_x, coverY: a.cover_y,
       coverUrl: cover && storage ? await storage.read(cover.thumb_key) : presetCover(a.cover_preset).url,
       photoCount: (db.prepare("SELECT COUNT(*) AS n FROM photos WHERE album_id=? AND user_id=?").get(a.id, a.user_id) as { n: number }).n,
@@ -205,11 +205,14 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const preset = body.coverPreset === undefined ? current?.cover_preset || "meadow" : body.coverPreset;
     const x = body.coverX === undefined ? current?.cover_x ?? 50 : body.coverX;
     const y = body.coverY === undefined ? current?.cover_y ?? 50 : body.coverY;
+    const theme = body.theme === undefined ? current?.space_theme || "forest" : body.theme;
+    if (theme !== "forest" && theme !== "lake" && theme !== "meadow")
+      throw new HttpError(400, "请选择有效的空间主题。");
     if (!name || name.length > 60 || typeof description !== "string" || description.length > 240 ||
       !ALBUM_COVERS.some(c => c.id === preset) || typeof x !== "number" || typeof y !== "number" ||
       !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100)
       throw new HttpError(400, "名称需为 1–60 字，简介最多 240 字，请选择有效封面。");
-    return { name, description, preset: String(preset), x, y };
+    return { name, description, preset: String(preset), x, y, theme };
   };
   app.get("/api/albums", async (req, res) => {
     const u = requireUser(req);
@@ -222,8 +225,8 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const u = requireUser(req), fields = validateAlbum(req.body || {});
     const id = randomUUID(), now = new Date().toISOString();
     const position = (db.prepare("SELECT COALESCE(MAX(position),-1)+1 AS n FROM albums WHERE user_id=?").get(u.id) as { n: number }).n;
-    db.prepare(`INSERT INTO albums(id,user_id,name,description,cover_preset,cover_x,cover_y,position,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,fields.name,fields.description,fields.preset,fields.x,fields.y,position,now,now);
+    db.prepare(`INSERT INTO albums(id,user_id,name,description,cover_preset,cover_x,cover_y,position,created_at,updated_at,space_theme)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,fields.name,fields.description,fields.preset,fields.x,fields.y,position,now,now,fields.theme);
     res.status(201).json(await albumDto(albumFor(id,u.id)));
   });
   app.get("/api/albums/:id", async (req,res) => res.json(await albumDto(albumFor(req.params.id,requireUser(req).id))));
@@ -239,8 +242,8 @@ export function createApp(config: Config, injectedStorage?: Storage) {
     const photoId = body.coverPhotoId === undefined ? a.cover_photo_id : body.coverPhotoId;
     if (photoId !== null && (typeof photoId !== "string" || !db.prepare("SELECT id FROM photos WHERE id=? AND album_id=? AND user_id=?").get(photoId,a.id,u.id)))
       throw new HttpError(400,"请使用当前相册集中的照片作为封面。");
-    db.prepare("UPDATE albums SET name=?,description=?,cover_preset=?,cover_photo_id=?,cover_x=?,cover_y=?,updated_at=? WHERE id=? AND user_id=?")
-      .run(fields.name,fields.description,fields.preset,photoId,fields.x,fields.y,new Date().toISOString(),a.id,u.id);
+    db.prepare("UPDATE albums SET name=?,description=?,cover_preset=?,cover_photo_id=?,cover_x=?,cover_y=?,space_theme=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(fields.name,fields.description,fields.preset,photoId,fields.x,fields.y,fields.theme,new Date().toISOString(),a.id,u.id);
     res.json(await albumDto(albumFor(a.id,u.id)));
   });
   app.post("/api/albums/:id/feature", async (req,res) => {

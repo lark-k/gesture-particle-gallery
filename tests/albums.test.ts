@@ -34,6 +34,26 @@ test("legacy photos and pending uploads migrate together once without changing o
   } finally {db.close();await rm(dir,{recursive:true,force:true});}
 });
 
+test("existing album schema gains independent persistent themes without resetting data",async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"album-themes-")),path=join(dir,"db.sqlite");
+  let db=new DatabaseSync(path);
+  try {
+    db.exec(`CREATE TABLE users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at INTEGER NOT NULL);
+      CREATE TABLE albums(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',cover_preset TEXT NOT NULL DEFAULT 'meadow',cover_photo_id TEXT,cover_x REAL NOT NULL DEFAULT 50,cover_y REAL NOT NULL DEFAULT 50,position INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+      INSERT INTO users VALUES('a','alice','hash',0);
+      INSERT INTO albums(id,user_id,name,created_at,updated_at) VALUES('one','a','one','2026-09-13','2026-09-13'),('two','a','two','2026-09-13','2026-09-13');
+      PRAGMA user_version=1;`);
+    db.close();db=openDatabase(path);
+    assert.equal(db.prepare("SELECT space_theme FROM albums WHERE id='one'").get()?.space_theme,"forest");
+    db.prepare("UPDATE albums SET space_theme='lake' WHERE id='one'").run();
+    assert.throws(()=>db.exec("UPDATE albums SET space_theme='invalid' WHERE id='two'"),/CHECK/);
+    db.close();db=openDatabase(path);
+    assert.equal(db.prepare("SELECT space_theme FROM albums WHERE id='one'").get()?.space_theme,"lake");
+    assert.equal(db.prepare("SELECT space_theme FROM albums WHERE id='two'").get()?.space_theme,"forest");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM albums").get()?.n,2);
+  } finally {db.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test("album ownership, fixed upload destination, cover validation, order, deletion and durable cleanup",async()=>{
   const objects=new Map<string,{data:Buffer;mime:string}>();let failDelete=false;
   const storage:Storage={
@@ -63,6 +83,19 @@ test("album ownership, fixed upload destination, cover validation, order, deleti
     const first=(await call("/api/albums",a,{name:"first",coverPreset:"coast"})).data;
     const second=(await call("/api/albums",a,{name:"second"})).data;
     const other=(await call("/api/albums",b,{name:"private"})).data;
+    assert.equal(first.theme,"forest");
+    assert.equal((await call(`/api/albums/${first.id}`,a,{theme:"lake"},"PATCH")).data.theme,"lake");
+    assert.equal((await call(`/api/albums/${second.id}`,a,{theme:"meadow"},"PATCH")).data.theme,"meadow");
+    for(const theme of ["unknown",null,42])
+      assert.equal((await call(`/api/albums/${first.id}`,a,{theme},"PATCH")).status,400);
+    assert.equal((await call(`/api/albums/${first.id}`,b,{theme:"forest"},"PATCH")).status,404);
+    await call(`/api/albums/${first.id}`,a,{name:"renamed"},"PATCH");
+    const nextSession=await call("/api/auth/login","",{username:"alice",password:"test-password-123"});
+    assert.equal((await call(`/api/albums/${first.id}`,nextSession.cookie)).data.theme,"lake");
+    const themes=(await call("/api/albums",nextSession.cookie)).data.albums;
+    assert.equal(themes.find((item:{id:string})=>item.id===first.id).theme,"lake");
+    assert.equal(themes.find((item:{id:string})=>item.id===second.id).theme,"meadow");
+    assert.equal((await call(`/api/albums/${other.id}`,b)).data.theme,"forest");
     for(const path of [`/api/albums/${first.id}`,`/api/albums/${first.id}/photos`])assert.equal((await call(path,b)).status,404);
     assert.equal((await call(`/api/albums/${first.id}`,b,{name:"stolen"},"PATCH")).status,404);
     assert.equal((await call(`/api/albums/${first.id}`,b,{},"DELETE")).status,404);
@@ -78,6 +111,7 @@ test("album ownership, fixed upload destination, cover validation, order, deleti
     assert.equal((await call(`/api/albums/${second.id}/photos`,a)).data.photos.length,0);
     const cover=await call(`/api/albums/${first.id}`,a,{coverPhotoId:completed.data.id,coverX:25,coverY:70},"PATCH");
     assert.equal(cover.status,200);assert.equal(cover.data.coverPhotoId,completed.data.id);assert.equal(cover.data.coverX,25);
+    assert.equal(cover.data.theme,"lake");
     assert.equal((await call(`/api/albums/${second.id}`,a,{coverPhotoId:completed.data.id},"PATCH")).status,400);
     assert.equal((await call(`/api/albums/${first.id}`,a,{coverX:101},"PATCH")).status,400);
     await call(`/api/albums/${second.id}/feature`,a,{});

@@ -25,6 +25,8 @@ export function openDatabase(path: string) {
       position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS albums_owner ON albums(user_id,position,created_at);
       CREATE TABLE IF NOT EXISTS storage_cleanup(object_key TEXT PRIMARY KEY);`);
+    if (!db.prepare("PRAGMA table_info(albums)").all().some(c => c.name === "space_theme"))
+      db.exec("ALTER TABLE albums ADD COLUMN space_theme TEXT NOT NULL DEFAULT 'forest' CHECK(space_theme IN ('forest','lake','meadow'))");
     for (const table of ["photos", "uploads"]) {
       const columns = db.prepare(`PRAGMA table_info(${table})`).all();
       if (!columns.some(c => c.name === "album_id"))
@@ -48,12 +50,13 @@ export function openDatabase(path: string) {
           BEGIN SELECT RAISE(ABORT,'album ownership mismatch'); END;`);
       }
     }
-    db.exec("PRAGMA user_version=1; COMMIT");
+    db.exec("PRAGMA user_version=2; COMMIT");
   } catch (error) { db.exec("ROLLBACK"); throw error; }
   return db;
 }
 export interface AlbumRow {
   id: string; user_id: string; name: string; description: string;
+  space_theme: "forest" | "lake" | "meadow";
   cover_preset: string; cover_photo_id: string | null; cover_x: number; cover_y: number;
   position: number; created_at: string; updated_at: string;
 }
