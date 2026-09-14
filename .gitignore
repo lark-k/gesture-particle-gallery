@@ -51,6 +51,7 @@ node_modules/
 /temp/
 /.cache/
 /.codegraph/
+/.firecrawl/
 
 # Editor and OS metadata
 .DS_Store

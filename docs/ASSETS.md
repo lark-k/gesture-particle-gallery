@@ -34,3 +34,9 @@
 `public/album-covers/` 中的 `meadow.webp`、`coast.webp`、`cat.webp`、`linen.webp` 和 `warm-window.webp` 均为使用 OpenAI ImageGen 专门生成的项目素材，不含用户照片。前三种为草地、海岸和午睡猫咪封面；亚麻纹理用于素色封面、书脊及内页，暖色窗影用于页面背景。森林与湖泊预设复用上述已生成的自然环境图。
 
 生产界面使用压缩 WebP，五份共约 967 KiB；PNG 原稿保存在被 Git 忽略的 `docs/design-references/album-materials/`。动态背景由本地图片配合 CSS 缓慢移动与鼠标视差实现，没有视频下载或第三方媒体请求。照片封面仍使用当前用户的授权读取地址。
+
+## 网站首页回忆相册（2026-09-14）
+
+`public/home/memory-album.png` 是用户选定的 OpenAI ImageGen 融合素材（1672 × 941）：童年单车、家人围坐与海边同行。素材作为完整图片显示，同时用于生成过渡粒子的位置；没有读取用户私有照片。悬停后通过粒子过渡播放用户提供的家庭回忆视频。原始文件 `826208b3ea756e7c0093eb3196f9bc09.mp4` 保留；网页使用约 6 秒、1280 × 720 的 H.264 静音版 `family-memory.mp4`（支持循环及 faststart），`family-memory-poster.jpg` 为视频首帧，播放失败时作为彩色静态回退。移开、离屏或页面隐藏后暂停播放，完整还原后重置播放位置。
+
+粒子亮核与柔和光晕的视觉方向参考 [MisterPrada/morph-particles](https://github.com/MisterPrada/morph-particles)。最终首页为统一浅色设计，使用独立编写的透明粒子着色器与双向变换时间线，未引入参考仓库的模型、声音或源码依赖。

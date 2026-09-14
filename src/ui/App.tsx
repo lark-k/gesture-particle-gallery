@@ -29,8 +29,10 @@ import {
 import type { Album, Photo, Quality } from "../../shared/types";
 import { AlbumLibrary, type AlbumEntry, type LocalCover } from "./AlbumLibrary";
 import { BookTransition } from "./BookTransition";
-import { GalleryScene, type SceneSnapshot } from "../scene/GalleryScene";
-import { HandCamera } from "../gesture/camera";
+import type { GalleryScene, SceneSnapshot } from "../scene/GalleryScene";
+import type { HandCamera } from "../gesture/camera";
+import HomePage from "./HomePage";
+import { resolveRoute } from "./routes";
 import { GestureRecognizer, type GestureDebug } from "../gesture/recognizer";
 import { THEMES, savedTheme, parseTheme, type ThemeId } from "../scene/themes";
 import { GESTURE, QUALITY } from "../config";
@@ -65,6 +67,9 @@ const initial: SceneSnapshot = {
 const qualityLabel = { low: "流畅", medium: "均衡", high: "精细" };
 const albumFromPath = () => location.pathname.match(/^\/albums\/([a-zA-Z0-9-]+)\/?$/)?.[1] || null;
 export default function App() {
+  const [path, setPath] = useState(location.pathname);
+  const route = resolveRoute(path);
+  const [sceneRevision, setSceneRevision] = useState(0);
   const [albumId,setAlbumId] = useState<string|null>(albumFromPath);
   const [album,setAlbum] = useState<Album|null>(null);
   const [journey,setJourney] = useState<AlbumEntry|null>(null);
@@ -109,6 +114,13 @@ export default function App() {
     [tab, setTab] = useState<"login" | "register">("login"),
     [authBusy, setAuthBusy] = useState(false),
     [authError, setAuthError] = useState("");
+  const galleryVisible = route.page === "demo" || (route.page === "gallery" && !!config?.user);
+  const navigate = (next: string, replace = false) => {
+    abort.current?.abort(); camera.current?.stop(); setCameraOn(false);
+    (replace ? history.replaceState : history.pushState).call(history, {}, "", next);
+    setPath(next); setAlbumId(resolveRoute(next).albumId);
+    setAuthOpen(false); window.scrollTo(0, 0);
+  };
   const [uploads, setUploads] = useState<
     {
       id: string;
@@ -136,22 +148,24 @@ export default function App() {
     abort.current?.abort(); camera.current?.stop(); setCameraOn(false);
     setAlbumId(null);setAlbum(null);setJourney(null);setGalleryError("");
     setThemeOpen(false);setThemeSaving(false);
-    history.pushState({},"","/albums");
+    navigate("/albums");
   };
   const enterAlbum = (entry:AlbumEntry) => {
     setGalleryError("");setPhotosReady(false);setSnapshot(initial);setAlbum(entry.album);
     setTheme(parseTheme(entry.album.theme));setThemeOpen(false);setThemeSaving(false);
     setJourney(entry);setAlbumId(entry.album.id);
-    history.pushState({},"",`/albums/${entry.album.id}`);
-    window.scrollTo(0,0);
+    navigate(`/albums/${entry.album.id}`);
   };
   useEffect(()=>{
-    const pop=()=>{setAlbumId(albumFromPath());setJourney(null);setAlbum(null);setGalleryError("");setThemeOpen(false);setThemeSaving(false);};
+    const pop=()=>{setPath(location.pathname);setAlbumId(albumFromPath());setJourney(null);setAlbum(null);setGalleryError("");setThemeOpen(false);setThemeSaving(false);setAuthOpen(false);camera.current?.stop();setCameraOn(false);};
     window.addEventListener("popstate",pop);
     const mq=matchMedia("(prefers-reduced-motion: reduce)");
     const change=()=>setReduced(mq.matches);mq.addEventListener("change",change);
     return()=>{window.removeEventListener("popstate",pop);mq.removeEventListener("change",change);};
   },[]);
+  useEffect(() => {
+    document.title = route.page === "home" ? "拾光 STILLSPACE · 让回忆有归处" : route.page === "albums" ? "我的相册集 · 拾光" : route.page === "demo" ? "示例空间 · 拾光" : "影像空间 · 拾光";
+  }, [route.page]);
   const refresh = () => {
     const sequence = ++refreshSequence.current;
     return api<AppConfig>("/api/config")
@@ -216,62 +230,60 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
   useEffect(() => {
-    if (!host.current || (config?.user && !albumId)) return;
+    if (!host.current || !galleryVisible || !config) return;
     setSnapshot(initial);
     setGalleryError("");
-    let s: GalleryScene;
-    try {
-      s = new GalleryScene(host.current, quality, reduced);
-    } catch {
-      notify("无法初始化 WebGL 2，请启用浏览器硬件加速后重新加载。");
-      setGalleryError("无法初始化画廊，请启用浏览器硬件加速后重试。");
-      return;
-    }
-    scene.current = s;
-    s.onChange = (v) => setSnapshot((old) => ({ ...v, fps: v.fps || old.fps }));
-    s.onError = m => { notify(m); setGalleryError(m); };
-    s.onReturn = () => recognizer.current.reset();
+    let s: GalleryScene | undefined, cancelled = false;
+    void import("../scene/GalleryScene").then(({ GalleryScene: Scene }) => {
+      if (cancelled || !host.current) return;
+      s = new Scene(host.current, quality, reduced);
+      scene.current = s;
+      s.onChange = (v) => setSnapshot((old) => ({ ...v, fps: v.fps || old.fps }));
+      s.onError = m => { notify(m); setGalleryError(m); };
+      s.onReturn = () => recognizer.current.reset();
+      setSceneRevision(v=>v+1);
+    }).catch(() => { if (!cancelled) setGalleryError("无法初始化画廊，请启用浏览器硬件加速后重试。"); });
     return () => {
-      s.dispose();
+      cancelled = true; s?.dispose();
       if (scene.current === s) scene.current = null;
     };
     // Recreate the entire GPU resource scope on account switch.
-  }, [config?.user?.id, albumId, galleryRetry]);
+  }, [config?.user?.id, !!config, albumId, galleryRetry, galleryVisible, route.page]);
   useEffect(() => {
     let cancelled = false;
     const current = scene.current;
-    if (!current || (config?.user && (!albumId || album?.id !== albumId))) return;
+    if (!current || !galleryVisible || (route.page !== "demo" && config?.user && (!albumId || album?.id !== albumId))) return;
     setThemeLoading(true);
     setThemeError("");
     current.setTheme(theme).then((complete) => {
       if (cancelled) return;
       if (!complete) setThemeError("部分环境素材未能加载，可重试补全；照片仍可操作。");
-      if (!config?.user) {
+      if (!config?.user || route.page === "demo") {
         try { localStorage.setItem("stillspace:theme", theme); } catch { /* Session choice still works. */ }
       }
     }).catch((e: Error) => {
       if (!cancelled) setThemeError(e.message);
     }).finally(() => { if (!cancelled) setThemeLoading(false); });
     return () => { cancelled = true; };
-  }, [theme, themeRetry, config?.user?.id, albumId, album?.id, galleryRetry]);
+  }, [theme, themeRetry, config?.user?.id, albumId, album?.id, galleryRetry, sceneRevision, galleryVisible, route.page]);
   useEffect(() => {
     scene.current?.setQuality(quality);
-  }, [quality]);
+  }, [quality, sceneRevision]);
   useEffect(() => {
     scene.current?.setReduced(reduced);
-  }, [reduced]);
+  }, [reduced, sceneRevision]);
   useEffect(() => {
     scene.current?.setOrbiting(autoOrbit);
-  }, [autoOrbit, config?.user?.id, albumId, galleryRetry]);
+  }, [autoOrbit, config?.user?.id, albumId, galleryRetry, sceneRevision]);
   useEffect(() => {
     scene.current?.setGestureControl(cameraOn);
-  }, [cameraOn, config?.user?.id, albumId, galleryRetry]);
+  }, [cameraOn, config?.user?.id, albumId, galleryRetry, sceneRevision]);
   useEffect(() => {
     if (!config) return;
     ++accountGeneration.current;
     if (userId.current !== (config.user?.id || null)) {
       // Preserve a direct album URL on initial login; clear it on an account switch.
-      if (userId.current) { setAlbumId(null); setAlbum(null); setJourney(null); history.replaceState({},"","/albums"); }
+      if (userId.current) { setAlbumId(null); setAlbum(null); setJourney(null); navigate(config.user ? "/albums" : "/", true); }
       localPhotos.current.clear();localCovers.current.clear();
     }
     userId.current = config.user?.id || null;
@@ -293,7 +305,7 @@ export default function App() {
     setCollectionOpen(false);
   }, [config?.user?.id, config?.mode]);
   useEffect(() => {
-    if (!config || (config.user && !albumId)) return;
+    if (!config || !galleryVisible || !scene.current || (route.page !== "demo" && config.user && !albumId)) return;
     const generation = ++accountGeneration.current;
     abort.current?.abort();uploadLock.current=false;setUploadBusy(false);setUploads([]);
     prepared.current.forEach(p=>p.revoke());prepared.current.clear();
@@ -302,7 +314,7 @@ export default function App() {
     const controller = new AbortController();
     void (async () => {
       let list: Photo[] = [];
-      if (config.user) {
+      if (config.user && route.page !== "demo") {
         const [a,summary] = await Promise.all([
           api<Album>(`/api/albums/${albumId}`,undefined,controller.signal),
           api<{totalPhotos:number}>("/api/albums",undefined,controller.signal),
@@ -336,10 +348,13 @@ export default function App() {
       if (e.name !== "AbortError" && generation===accountGeneration.current) { notify(e.message); setGalleryError(e.message); }
     });
     return () => { controller.abort(); abort.current?.abort(); accountGeneration.current++; };
-  }, [config?.user?.id, config?.mode, albumId, galleryRetry]);
+  }, [config?.user?.id, config?.mode, albumId, galleryRetry, sceneRevision, galleryVisible, route.page]);
   useEffect(() => {
-    if (!video.current) return;
-    const c = new HandCamera(video.current);
+    if (!video.current || !galleryVisible) return;
+    let c: HandCamera | undefined, cancelled = false;
+    void import("../gesture/camera").then(({HandCamera: Camera}) => {
+    if (cancelled || !video.current) return;
+    c = new Camera(video.current);
     camera.current = c;
     let lastDebug = 0;
     c.onStatus = setCameraStatus;
@@ -393,11 +408,12 @@ export default function App() {
         lastDebug = f.time;
       }
     };
+    }).catch(()=>{if(!cancelled)notify("手势模块加载失败，请刷新后重试。");});
     return () => {
-      c.stop();
+      cancelled = true; c?.stop();
       if (camera.current === c) camera.current = null;
     };
-  }, [config?.user?.id, albumId]);
+  }, [config?.user?.id, albumId, galleryVisible]);
   const toggleCamera = () => {
     if (cameraOn) {
       camera.current?.stop();
@@ -412,7 +428,7 @@ export default function App() {
   };
   const chooseTheme = async (id: ThemeId) => {
     if (themeSaving) return;
-    if (!config?.user) { setTheme(id);setThemeOpen(false);return; }
+    if (!config?.user || route.page === "demo") { setTheme(id);setThemeOpen(false);return; }
     if (!albumId || album?.id !== albumId) return;
     const generation=accountGeneration.current;
     setThemeSaving(true);
@@ -436,6 +452,7 @@ export default function App() {
       announceSessionChange();
       await refresh();
       setAuthOpen(false);
+      navigate(route.page === "gallery" && albumId ? `/albums/${albumId}` : "/albums", true);
       notify(
         tab === "login" ? "已进入你的独立影像空间" : "账户已创建，欢迎进入拾光",
       );
@@ -452,6 +469,7 @@ export default function App() {
       setActiveAccount(null);
       setConfig((c) => (c ? { ...c, user: null } : c));
       announceSessionChange();
+      navigate("/", true);
       notify(config?.mode === "oss" ? "已退出，照片已保存在你的账户中" : "已退出，当前设备的本地照片已清除");
     } catch (e) {
       notify((e as Error).message);
@@ -580,15 +598,25 @@ export default function App() {
   const particleBusy = ["ASSEMBLING", "DISSOLVING"].includes(
     snapshot.particles,
   );
-  if (config?.user && !albumId) return <AlbumLibrary key={config.user.id} config={config} enter={enterAlbum}
-    logout={()=>void logout()} localPhotos={localPhotos.current} localCovers={localCovers.current} notice={toast}/>;
+  const authDialog = authOpen && <AuthDialog tab={tab} busy={authBusy} error={authError} config={config}
+    close={()=>setAuthOpen(false)} submit={authenticate} change={()=>{setTab(t=>t==="login"?"register":"login");setAuthError("");}}/>;
+  if (route.page === "missing") return <main className="route-message"><h1>这一页，暂时没有故事。</h1><p>页面不存在，回首页继续拾光吧。</p><button onClick={()=>navigate("/")}>返回首页</button></main>;
+  if (route.page === "home" || (!config?.user && (route.page === "albums" || route.page === "gallery"))) return <>
+    <HomePage config={config} error={configError} retry={()=>void refresh()} paused={authOpen}
+      protectedPage={route.page !== "home"} authenticate={t=>{setTab(t);setAuthError("");setAuthOpen(true);}}
+      enter={()=>navigate("/albums")} demo={()=>{setTheme(savedTheme());navigate("/demo");}} logout={()=>void logout()}/>
+    <div className="home-auth">{authDialog}</div>
+  </>;
+  if (config?.user && route.page === "albums") return <AlbumLibrary key={config.user.id} config={config} enter={enterAlbum}
+    home={()=>navigate("/")} logout={()=>void logout()} localPhotos={localPhotos.current} localCovers={localCovers.current} notice={toast}/>;
   return (
     <main className={`${focused ? "app is-focused" : "app"}${albumId && config?.user ? " has-album" : ""}`} data-theme={theme}>
+      {route.page === "demo" && <button className="album-back" onClick={()=>navigate("/")}><ArrowLeft size={16}/> 返回首页</button>}
       {albumId && config?.user && <><button className="album-back" onClick={returnToAlbums}><ArrowLeft size={16}/> 返回相册集</button><span className="gallery-album-title">{album?.name||"正在打开相册…"}</span></>}
-      {galleryError && !journey && config?.user && <div className="gallery-load-error" role="alert"><p>{galleryError}</p><button onClick={()=>setGalleryRetry(v=>v+1)}>重试加载</button><button onClick={returnToAlbums}>返回相册集</button></div>}
+      {galleryError && !journey && <div className="gallery-load-error" role="alert"><p>{galleryError}</p><button onClick={()=>setGalleryRetry(v=>v+1)}>重试加载</button><button onClick={()=>navigate(config?.user?"/albums":"/")}>返回</button></div>}
       <div className="ambient" />
       <header className="topbar">
-        <a className="brand" href="/" aria-label="拾光首页">
+        <a className="brand" href="/" onClick={e=>{e.preventDefault();navigate("/");}} aria-label="拾光首页">
           <span className="brand-mark">
             <Aperture size={26} strokeWidth={1.25} />
           </span>
@@ -968,78 +996,7 @@ export default function App() {
           </button>
         </Modal>
       )}
-      {authOpen && (
-        <Modal
-          title={tab === "login" ? "回到你的影像空间" : "创建你的影像空间"}
-          subtitle="YOUR OWN LITTLE UNIVERSE"
-          close={() => setAuthOpen(false)}
-        >
-          <form onSubmit={(e) => void authenticate(e)} className="auth-form">
-            <label>
-              用户名
-              <input
-                name="username"
-                required
-                minLength={3}
-                maxLength={32}
-                autoComplete="username"
-                placeholder="3–32 位字母、数字或中文"
-              />
-            </label>
-            <label>
-              密码
-              <input
-                name="password"
-                type="password"
-                required
-                minLength={tab === "register" ? 12 : 1}
-                maxLength={128}
-                autoComplete={
-                  tab === "login" ? "current-password" : "new-password"
-                }
-                placeholder={tab === "register" ? "至少 12 位" : "输入你的密码"}
-              />
-            </label>
-            {tab === "register" && config?.registration === "invite" && (
-              <label>
-                邀请码
-                <input name="inviteCode" required autoComplete="off" />
-              </label>
-            )}
-            {authError && (
-              <p className="form-error" role="alert">
-                {authError}
-              </p>
-            )}
-            <button className="primary full" disabled={authBusy}>
-              {authBusy ? (
-                <LoaderCircle className="spin" size={17} />
-              ) : (
-                <LogIn size={17} />
-              )}{" "}
-              {tab === "login" ? "登录" : "创建账户"}
-            </button>
-          </form>
-          {config?.registration !== "closed" && (
-            <button
-              className="text-button"
-              onClick={() => {
-                setTab((t) => (t === "login" ? "register" : "login"));
-                setAuthError("");
-              }}
-            >
-              {tab === "login" ? "还没有账户？创建账户" : "已有账户？返回登录"}{" "}
-              <ArrowRight size={14} />
-            </button>
-          )}
-          <p className="fine-print">
-            照片与上传授权按账户隔离。
-            {config?.mode === "local"
-              ? "当前为本地演示，账户会保存，本地照片仅在本次会话中保留。"
-              : "私有照片通过短时读取授权加载。"}
-          </p>
-        </Modal>
-      )}
+      {authDialog}
       {collectionOpen && (
         <Modal
           title="每一帧，都在这里"
@@ -1153,6 +1110,22 @@ export default function App() {
     </main>
   );
 }
+function AuthDialog({tab,busy,error,config,close,submit,change}:{
+  tab:"login"|"register";busy:boolean;error:string;config:AppConfig|null;
+  close:()=>void;submit:(e:FormEvent<HTMLFormElement>)=>Promise<void>;change:()=>void;
+}) {
+  return <Modal title={tab==="login"?"回到你的影像空间":"创建你的影像空间"} subtitle="A LITTLE SPACE, JUST FOR YOU" close={close}>
+    <form onSubmit={e=>void submit(e)} className="auth-form">
+      <label>用户名<input name="username" required minLength={3} maxLength={32} autoComplete="username" placeholder="3–32 位字母、数字或中文" disabled={busy}/></label>
+      <label>密码<input name="password" type="password" required minLength={tab==="register"?12:1} maxLength={128} autoComplete={tab==="login"?"current-password":"new-password"} placeholder={tab==="register"?"至少 12 位":"输入你的密码"} disabled={busy}/></label>
+      {tab==="register"&&config?.registration==="invite"&&<label>邀请码<input name="inviteCode" required autoComplete="off" disabled={busy}/></label>}
+      {error&&<p className="form-error" role="alert">{error}</p>}
+      <button className="primary full" disabled={busy||!config}>{busy?<LoaderCircle className="spin" size={17}/>:<ArrowRight size={17}/>} {busy?"请稍候…":tab==="login"?"登录":"创建账户"}</button>
+    </form>
+    {config?.registration!=="closed"&&<button className="text-button" disabled={busy} onClick={change}>{tab==="login"?"还没有账户？创建账户":"已有账户？返回登录"}<ArrowRight size={14}/></button>}
+    <p className="fine-print">{config?.mode==="local"?"当前为本地体验：账户与相册会保存，上传照片仅在本次页面会话中保留。":"你的相册仅自己可见，照片保存在个人空间。"}</p>
+  </Modal>;
+}
 function Guide({
   n,
   icon,
@@ -1187,6 +1160,8 @@ function Modal({
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prior = document.activeElement as HTMLElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     ref.current?.querySelector<HTMLElement>("button,input")?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -1211,6 +1186,7 @@ function Modal({
     };
     window.addEventListener("keydown", key, true);
     return () => {
+      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", key, true);
       prior?.focus();
     };

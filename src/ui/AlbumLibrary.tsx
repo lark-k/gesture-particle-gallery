@@ -20,8 +20,8 @@ export function BookArtwork({ album }: { album: Pick<Album,"name"|"coverUrl"|"co
     </span>
   </>;
 }
-export function AlbumLibrary({ config, enter, logout, localPhotos, localCovers, notice }: {
-  config: AppConfig; enter: (entry: AlbumEntry) => void; logout: () => void;
+export function AlbumLibrary({ config, enter, logout, home, localPhotos, localCovers, notice }: {
+  config: AppConfig; enter: (entry: AlbumEntry) => void; logout: () => void; home: () => void;
   localPhotos: Map<string,Photo[]>; localCovers: Map<string,LocalCover>;
   notice?: string;
 }) {
@@ -100,7 +100,7 @@ export function AlbumLibrary({ config, enter, logout, localPhotos, localCovers, 
   }}>
     <div className="album-ambient" aria-hidden="true"/>
     <header className="album-topbar">
-      <a className="album-brand" href="/" aria-label="拾光相册首页"><Aperture strokeWidth={1.2}/><span>拾光<small>STILLSPACE</small></span></a>
+      <a className="album-brand" href="/" onClick={e=>{e.preventDefault();home();}} aria-label="拾光首页"><Aperture strokeWidth={1.2}/><span>拾光<small>STILLSPACE</small></span></a>
       <button className="album-account" onClick={logout} title="退出登录"><span>{config.user?.username}</span><LogOut size={16}/></button>
     </header>
     <main className="album-main">
