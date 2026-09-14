@@ -3,6 +3,7 @@ import { BufferGeometry, Float32BufferAttribute, Mesh, OrthographicCamera, Plane
 import { stepMemorySpring } from "../interaction/memorySpring";
 import { advanceMemoryMorph, memoryMorphEnvelope } from "../interaction/memoryMorph";
 import { memoryBookBreath, memoryBookDeformation } from "../interaction/memoryBook";
+import { MemoryVideoLoop, MemoryVideoState } from "../interaction/memoryVideo";
 
 /** The photograph stays legible at both ends of a reversible particle transition. */
 export default function MemoryCloud({ motion, paused, chapter }: { motion: boolean; paused: boolean; chapter: number }) {
@@ -18,23 +19,24 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
     let renderer: WebGLRenderer | undefined, geometry: BufferGeometry | undefined;
     let photoGeometry: PlaneGeometry | undefined, photoMaterial: ShaderMaterial | undefined;
     let material: ShaderMaterial | undefined, texture: Texture | undefined;
-    let videoTexture: VideoTexture | undefined, posterTexture: Texture | undefined;
+    let videoTextures: VideoTexture[] = [], posterTexture: Texture | undefined;
     let resizeObserver: ResizeObserver | undefined, intersection: IntersectionObserver | undefined;
     const source = new Image();
     const poster = new Image();
-    const video = document.createElement("video");
-    video.muted = video.defaultMuted = true; video.playsInline = true; video.loop = true;
-    video.preload = "metadata"; video.src = "/home/family-memory.mp4";
-    let wantsVideo = false, videoFailed = false, posterReady = false;
+    const videos = [document.createElement("video"), document.createElement("video")] as const;
+    for (const video of videos) {
+      video.muted = video.defaultMuted = true; video.playsInline = true; video.loop = false;
+      video.preload = "auto"; video.src = "/home/family-memory.mp4";
+    }
+    const videoLoop = new MemoryVideoLoop(videos);
+    const videoState = new MemoryVideoState();
+    let videoRewinds = 0;
+    let videoFailed = false, posterReady = false;
     const syncVideo = (wanted: boolean) => {
-      if (wanted === wantsVideo) return;
-      wantsVideo = wanted;
-      if (!wanted) { video.pause(); element.dataset.videoState = "paused"; return; }
-      if (!videoFailed) void video.play().then(() => {
-        if (!wantsVideo || disposed) video.pause();
-      }).catch(() => { /* The color poster remains visible if playback is blocked. */ });
+      videoLoop.setWanted(wanted && !videoFailed);
+      if (!wanted) element.dataset.videoState = "paused";
     };
-    video.onerror = () => { videoFailed = true; video.pause(); resume(); };
+    for (const video of videos) video.onerror = () => { videoFailed = true; syncVideo(false); resume(); };
     const pointer = { x: -10000, y: -10000, active: false, touch: false, till: 0 };
     let scale = 1, width = 1, height = 1, imageWidth = 1200, imageHeight = 675, offsetX = 0;
     let resume = () => {};
@@ -62,7 +64,7 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pointer.active = !pointer.active; resume(); }
     };
     const visibility = () => { if (document.hidden) { syncVideo(false); cancelAnimationFrame(frame); frame = 0; pointer.active = false; } else resume(); };
-    const contextLost = (event: Event) => { event.preventDefault(); syncVideo(false); contextAvailable = false; cancelAnimationFrame(frame); frame = 0; firstRender = true; setReady(false); };
+    const contextLost = (event: Event) => { event.preventDefault(); syncVideo(false); videoState.invalidateFrame(); contextAvailable = false; cancelAnimationFrame(frame); frame = 0; firstRender = true; setReady(false); };
     const contextRestored = () => { contextAvailable = true; resume(); };
     source.onload = () => {
       if (disposed) return;
@@ -123,22 +125,23 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
             }`,
         });
         texture = new Texture(source); texture.colorSpace = SRGBColorSpace; texture.needsUpdate = true;
-        videoTexture = new VideoTexture(video); videoTexture.colorSpace = SRGBColorSpace;
+        videoTextures = videos.map(video => { const result = new VideoTexture(video); result.colorSpace = SRGBColorSpace; return result; });
         posterTexture = new Texture(poster); posterTexture.colorSpace = SRGBColorSpace;
         poster.onload = () => { if (!disposed) { posterTexture!.needsUpdate = true; posterReady = true; resume(); } };
         poster.src = "/home/family-memory-poster.jpg";
         photoGeometry = new PlaneGeometry(imageWidth, imageHeight, 100, 64);
         photoMaterial = new ShaderMaterial({
           transparent: true, depthWrite: false,
-          uniforms: { ...shared, picture: { value: texture }, memory: { value: texture }, videoFrame: { value: 0 } },
+          uniforms: { ...shared, picture: { value: texture }, memory: { value: texture }, memoryNext: { value: texture }, loopBlend: { value: 0 }, videoFrame: { value: 0 } },
           vertexShader: `${memoryBookDeformation}
             varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(foldMemoryPage(position,uv),1.);}`,
-          fragmentShader: `uniform sampler2D picture; uniform sampler2D memory; uniform float videoFrame; uniform float morph; uniform float bridge; varying vec2 vUv;
+          fragmentShader: `uniform sampler2D picture; uniform sampler2D memory; uniform sampler2D memoryNext; uniform float loopBlend; uniform float videoFrame; uniform float morph; uniform float bridge; varying vec2 vUv;
             float random(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
             void main(){
               vec3 color=texture2D(picture,vUv).rgb;
               vec4 target=texture2D(memory,vUv);
               if(videoFrame>.5) target=sRGBTransferEOTF(target);
+              if(loopBlend>0.) target=mix(target,sRGBTransferEOTF(texture2D(memoryNext,vUv)),loopBlend);
               // Switch beneath the fully dissolved midpoint; never double-expose the two albums.
               vec3 transformed=mix(color,target.rgb,step(.5,morph));
               float grain=random(floor(vUv*vec2(550.,310.)));
@@ -179,6 +182,7 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
         };
         resize(); resizeObserver = new ResizeObserver(resize); resizeObserver.observe(element);
         const attr = geometry.getAttribute("position"), coords = attr.array as Float32Array;
+        const lastVideoFrames = ["", ""];
         const tick = (now: number) => {
           if (disposed || document.hidden || !inView || !contextAvailable) { frame = 0; return; }
           const dt = Math.min(.035, (now - last) / 1000); last = now;
@@ -186,12 +190,25 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
           if (pointer.till && now > pointer.till) pointer.active = false;
           const active = pointer.active && moving;
           syncVideo(active);
-          const hasVideoFrame = !videoFailed && video.readyState >= 2;
+          videoLoop.advance(now);
+          const video = videos[videoLoop.index], videoTexture = videoTextures[videoLoop.index];
+          // Some decoders miss rVFC notifications around a restart. Refresh at the source's 24 fps too.
+          for (const index of new Set([videoLoop.index, videoLoop.nextIndex])) {
+            const buffer = videos[index];
+            const decodedFrame = `${videoLoop.cycles}:${Math.floor(buffer.currentTime * 24)}`;
+            if (buffer.readyState >= 2 && !buffer.seeking && decodedFrame !== lastVideoFrames[index]) {
+              videoTextures[index].needsUpdate = true; lastVideoFrames[index] = decodedFrame;
+            }
+          }
+          const targetAvailable = !videoFailed && (videoState.hasFrame || video.readyState >= 2) || posterReady;
+          progress = advanceMemoryMorph(progress, active && targetAvailable, dt, !controls.current.motion);
+          const { hasFrame: hasVideoFrame, rewind } = videoState.update(video.readyState, videoFailed, active, progress === 0);
           photoMaterial!.uniforms.memory.value = hasVideoFrame ? videoTexture : posterReady ? posterTexture : texture;
           photoMaterial!.uniforms.videoFrame.value = hasVideoFrame ? 1 : 0;
+          photoMaterial!.uniforms.memoryNext.value = videoTextures[videoLoop.nextIndex];
+          photoMaterial!.uniforms.loopBlend.value = hasVideoFrame ? videoLoop.blend : 0;
           if (moving) elapsed += dt;
-          progress = advanceMemoryMorph(progress, active && (hasVideoFrame || posterReady), dt, !controls.current.motion);
-          if (!active && progress === 0 && video.currentTime > 0) video.currentTime = 0;
+          if (rewind) { videoLoop.reset(); videoState.invalidateFrame(); lastVideoFrames.fill(""); videoRewinds++; }
           const { morph, bridge } = memoryMorphEnvelope(progress);
           shared.time.value = elapsed; shared.morph.value = morph; shared.bridge.value = bridge;
           shared.pageBreath.value = memoryBookBreath(elapsed, morph, controls.current.motion);
@@ -205,8 +222,16 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
           element.dataset.pageBreath = shared.pageBreath.value.toFixed(3);
           if (++settle % 15 === 0) {
             element.dataset.displacement = disturbed.toFixed(2); element.dataset.particles = String(seeds.length);
-            element.dataset.videoState = videoFailed ? "fallback" : video.paused ? "paused" : "playing";
+            element.dataset.videoState = videoFailed ? "fallback" : !active ? "paused" : videoLoop.nextIndex !== videoLoop.index ? "loop-fade" : video.paused ? "paused" : "playing";
+            element.dataset.videoBlend = videoLoop.blend.toFixed(3);
             element.dataset.videoTime = video.currentTime.toFixed(2);
+            element.dataset.videoReady = String(video.readyState);
+            element.dataset.videoSurface = hasVideoFrame ? "video" : "poster";
+            element.dataset.videoRewinds = String(videoRewinds);
+            element.dataset.videoCycle = String(videoLoop.cycles);
+            element.dataset.videoBuffer = String(videoLoop.index);
+            element.dataset.videoFrames = String(video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0);
+            element.dataset.videoTextureVersion = String(videoTexture.version);
           }
           renderer!.render(scene, camera);
           if(firstRender){firstRender=false;setReady(true);}
@@ -217,7 +242,7 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
         intersection = new IntersectionObserver(entries => { inView = entries[0].isIntersecting; if (inView) resume(); else { syncVideo(false); cancelAnimationFrame(frame); frame = 0; pointer.active = false; } }, { threshold: .02 });
         intersection.observe(element); resume();
       } catch {
-        syncVideo(false); videoTexture?.dispose(); posterTexture?.dispose();
+        syncVideo(false); videoTextures.forEach(texture => texture.dispose()); posterTexture?.dispose();
         renderer?.domElement.remove(); renderer?.dispose(); geometry?.dispose(); material?.dispose();
         photoGeometry?.dispose(); photoMaterial?.dispose(); texture?.dispose(); setReady(false);
       }
@@ -229,8 +254,8 @@ export default function MemoryCloud({ motion, paused, chapter }: { motion: boole
     document.addEventListener("visibilitychange", visibility);
     return () => {
       disposed = true; wake.current = () => {}; cancelAnimationFrame(frame); source.onload = null; poster.onload = null;
-      syncVideo(false); video.onerror = null; videoTexture?.dispose(); posterTexture?.dispose();
-      video.removeAttribute("src"); video.load();
+      videoLoop.dispose(); videoTextures.forEach(texture => texture.dispose()); posterTexture?.dispose();
+      for (const video of videos) { video.onerror = null; video.removeAttribute("src"); video.load(); }
       resizeObserver?.disconnect(); intersection?.disconnect();
       element.removeEventListener("pointermove", move); element.removeEventListener("pointerdown", move);
       element.removeEventListener("pointerleave", leave); element.removeEventListener("pointercancel", leave);
